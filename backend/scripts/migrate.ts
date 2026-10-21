@@ -1,0 +1,12 @@
+import { readFile } from "node:fs/promises";
+import { Surreal } from "surrealdb";
+import { loadConfig } from "../src/config.js";
+const c = loadConfig(); const db = new Surreal();
+const identifier = /^[A-Za-z_][A-Za-z0-9_]*$/;
+if (!identifier.test(c.SURREAL_NAMESPACE) || !identifier.test(c.SURREAL_DATABASE)) throw new Error("Namespace and database names must be simple SurrealQL identifiers");
+await db.connect(c.SURREAL_URL);
+await db.signin({ username: c.SURREAL_USERNAME, password: c.SURREAL_PASSWORD });
+await db.query(`DEFINE NAMESPACE IF NOT EXISTS ${c.SURREAL_NAMESPACE}; USE NS ${c.SURREAL_NAMESPACE}; DEFINE DATABASE IF NOT EXISTS ${c.SURREAL_DATABASE};`);
+await db.use({ namespace: c.SURREAL_NAMESPACE, database: c.SURREAL_DATABASE });
+await db.query(await readFile(new URL("../migrations/001_initial.surql", import.meta.url), "utf8"));
+await db.close(); console.log("Applied migrations/001_initial.surql");

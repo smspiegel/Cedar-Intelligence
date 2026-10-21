@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: cedar-api
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: NODE_ENV
+        value: production
+      - key: API_TOKEN
+        sync: false
+      - key: TENANT_ID
+        sync: false
+      - key: SURREAL_URL
+        sync: false
+      - key: SURREAL_NAMESPACE
+        value: cedar
+      - key: SURREAL_DATABASE
+        value: cedar
+      - key: SURREAL_USERNAME
+        sync: false
+      - key: SURREAL_PASSWORD
+        sync: false
+      - key: RENDER_API_KEY
+        sync: false
+      - key: RENDER_WORKFLOW_SLUG
+        value: cedar-workflow
+      - key: EVALUATOR_URL
+        sync: false
+      - key: EVALUATOR_API_KEY
+        sync: false
+      - key: EVALUATOR_MODEL
+        value: gpt-5-mini
+
