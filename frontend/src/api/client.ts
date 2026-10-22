@@ -28,11 +28,12 @@ export type Monitor = {
 type Envelope<T> = { data: T };
 type Collection<T> = Envelope<T[]> & { meta: { limit: number; hasMore: boolean } };
 type ErrorEnvelope = { error?: { message?: string } };
+type AccessTokenProvider = () => Promise<string | null>;
 
 export class CedarApiError extends Error {}
 
 export class CedarApi {
-  constructor(private baseUrl: string, private token: string) {}
+  constructor(private baseUrl: string, private getAccessToken: AccessTokenProvider) {}
 
   async listMonitors(): Promise<Collection<Monitor>> {
     return this.request<Collection<Monitor>>("/v1/monitors");
@@ -43,9 +44,12 @@ export class CedarApi {
   }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+    const token = await this.getAccessToken();
+    if (!token) throw new CedarApiError("Your session has expired. Please sign in again.");
+
     const response = await fetch(`${this.baseUrl}${path}`, {
       ...init,
-      headers: { accept: "application/json", authorization: `Bearer ${this.token}`, ...init.headers },
+      headers: { accept: "application/json", authorization: `Bearer ${token}`, ...init.headers },
     });
     if (!response.ok) {
       const body = await response.json().catch(() => ({})) as ErrorEnvelope;
@@ -60,5 +64,10 @@ export const createDevelopmentApi = () => {
   // Expo public variables are embedded in browser bundles. This escape hatch is only
   // available in local development; production requires the JWT integration.
   const token = __DEV__ ? process.env.EXPO_PUBLIC_DEV_API_TOKEN : undefined;
-  return baseUrl && token ? new CedarApi(baseUrl, token) : null;
+  return baseUrl && token ? new CedarApi(baseUrl, async () => token) : null;
+};
+
+export const createClerkApi = (getToken: AccessTokenProvider) => {
+  const baseUrl = process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, "");
+  return baseUrl ? new CedarApi(baseUrl, getToken) : null;
 };

@@ -91,3 +91,5 @@ services:
         value: 24
       - key: EXPO_PUBLIC_API_URL
         sync: false
+      - key: EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY
+        sync: false

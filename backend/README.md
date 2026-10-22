@@ -38,7 +38,7 @@ npm run dev
 
 `RENDER_USE_LOCAL_DEV=true` directs the SDK dispatcher to the local task server. Configure `EVALUATOR_URL`, key, and model for a JSON-mode OpenAI-compatible Chat Completions API. For an entirely local test path, use `npm test`; tests inject a deterministic evaluator but exercise the same executor.
 
-In development, API calls require `Authorization: Bearer $API_TOKEN`. Tenant headers and tenant fields in request bodies are ignored; `TENANT_ID` is server configuration. In production, set `AUTH_MODE=jwt`; Cedar validates the configured issuer, audience, and JWKS, then derives the tenant from `AUTH_TENANT_CLAIM`. Do not embed `API_TOKEN` in the Expo bundle.
+In development, API calls require `Authorization: Bearer $API_TOKEN`. Tenant headers and tenant fields in request bodies are ignored; `TENANT_ID` is server configuration. In production, set `AUTH_MODE=jwt`; Cedar validates the configured issuer and JWKS, validates an audience when one is configured, then derives the tenant from `AUTH_TENANT_CLAIM`. Do not embed `API_TOKEN` in the Expo bundle.
 
 ```bash
 curl -H "Authorization: Bearer $API_TOKEN" -H 'content-type: application/json' \
@@ -76,10 +76,10 @@ Set `AGENT_MEMORY_ENDPOINT`, `AGENT_MEMORY_CONTEXT`, and `AGENT_MEMORY_API_KEY` 
 The repository-root [`render.yaml`](../render.yaml) defines three independently deployed services: `cedar-web` (Expo static site), `cedar-api` (web service), and `cedar-workflow` (Render Workflow). Each service uses its directory as `rootDir`, so frontend-only changes do not need to rebuild the API.
 
 1. Provision a reachable SurrealDB 3.x instance and configure its connection values on both `cedar-api` and `cedar-workflow`.
-2. Configure the JWT issuer, audience, JWKS endpoint, tenant claim, and the web origin allowlist on `cedar-api`.
+2. Configure Clerk on `cedar-api`: set `AUTH_ISSUER` to the exact `iss` claim from a Clerk session token, `AUTH_JWKS_URL=https://api.clerk.com/v1/jwks`, leave `AUTH_AUDIENCE` blank unless you configure an audience claim, and keep `AUTH_TENANT_CLAIM=org_id`. Cedar maps Clerk's active Organization claim (`o.id`) to that tenant value.
 3. Configure `RENDER_API_KEY` and `RENDER_WORKFLOW_SLUG=cedar-workflow` only on `cedar-api`.
 4. Configure the evaluator, Agent Memory, and connector secrets only on `cedar-workflow`.
-5. Set `EXPO_PUBLIC_API_URL` to the API's HTTPS URL on `cedar-web`. It is public build-time configuration, never a secret.
+5. Set `EXPO_PUBLIC_API_URL` to the API's HTTPS URL and `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` to the Clerk publishable key on `cedar-web`. Both are public build-time configuration, never secrets. Add the static site's URL to Clerk's allowed origins and to the API's `CORS_ORIGINS`.
 6. Deploy the Blueprint. The API's pre-deploy command applies ordered database migrations. Then run a smoke test: `/health` → authenticated `/v1/monitors` → create execution → poll `/v1/executions/:id`.
 
 Render docs: [Workflows](https://render.com/docs/workflows), [TypeScript SDK](https://render.com/docs/workflows-sdk-typescript), and [local development](https://render.com/docs/workflows-local-development). SurrealDB references: [JavaScript SDK](https://surrealdb.com/docs/sdk/javascript) and [Agent Memory JavaScript SDK](https://surrealdb.com/docs/agent-memory/reference/sdk-javascript).
