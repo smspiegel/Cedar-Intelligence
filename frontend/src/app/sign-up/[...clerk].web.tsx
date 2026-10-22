@@ -1,12 +1,10 @@
 import { SignUp } from '@clerk/expo/web';
-import { StyleSheet, View } from 'react-native';
+import { Redirect } from 'expo-router';
+import { CedarAuthShell, cedarClerkAppearance } from '../../cedar-auth-shell';
 
 // Clerk uses nested paths for post-sign-up tasks, including organization
 // selection. Keep those paths inside the SignUp component's path-based flow.
 export default function SignUpTaskScreen() {
-  return <View style={styles.page}><SignUp path="/sign-up" routing="path" signInUrl="/sign-in" /></View>;
+  if (!process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY) return <Redirect href="/" />;
+  return <CedarAuthShell><SignUp appearance={cedarClerkAppearance} path="/sign-up" routing="path" signInUrl="/sign-in" /></CedarAuthShell>;
 }
-
-const styles = StyleSheet.create({
-  page: { alignItems: 'center', backgroundColor: '#f7f7f6', flex: 1, justifyContent: 'center', minHeight: '100%' },
-});
