@@ -9,8 +9,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/server.ts",
-    "start": "node dist/server.js",
-    "workflow": "node dist/workflow.js",
+    "start": "node dist/src/server.js",
+    "workflow": "node dist/src/workflow.js",
     "workflow:dev": "render workflows dev -- tsx src/workflow.ts",
     "migrate": "tsx scripts/migrate.ts",
     "seed": "tsx scripts/seed.ts",
