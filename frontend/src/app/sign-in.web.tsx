@@ -1,7 +1,9 @@
 import { SignIn } from '@clerk/expo/web';
+import { Redirect } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
 export default function SignInScreen() {
+  if (!process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY) return <Redirect href="/" />;
   return <View style={styles.page}><SignIn path="/sign-in" routing="path" signUpUrl="/sign-up" /></View>;
 }
 
