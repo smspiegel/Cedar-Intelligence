@@ -1,0 +1,4 @@
+interface:
+  display_name: "Clerk Setup"
+  short_description: "Set up Clerk authentication in any project"
+  default_prompt: "Use $clerk-setup to add Clerk authentication to this project."
