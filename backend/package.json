@@ -10,18 +10,20 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
-    "workflow": "tsx src/workflow.ts",
-    "workflow:dev": "render workflows dev -- npm run workflow",
+    "workflow": "node dist/workflow.js",
+    "workflow:dev": "render workflows dev -- tsx src/workflow.ts",
     "migrate": "tsx scripts/migrate.ts",
     "seed": "tsx scripts/seed.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@fastify/cors": "^11.3.1",
     "@renderinc/sdk": "^1.0.0",
     "@surrealdb/memory": "latest",
     "dotenv": "latest",
     "fastify": "latest",
+    "jose": "^6.2.13",
     "surrealdb": "latest",
     "zod": "latest"
   },

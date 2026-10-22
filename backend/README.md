@@ -38,7 +38,7 @@ npm run dev
 
 `RENDER_USE_LOCAL_DEV=true` directs the SDK dispatcher to the local task server. Configure `EVALUATOR_URL`, key, and model for a JSON-mode OpenAI-compatible Chat Completions API. For an entirely local test path, use `npm test`; tests inject a deterministic evaluator but exercise the same executor.
 
-API calls require `Authorization: Bearer $API_TOKEN`. Tenant headers and tenant fields in request bodies are ignored; `TENANT_ID` is server configuration.
+In development, API calls require `Authorization: Bearer $API_TOKEN`. Tenant headers and tenant fields in request bodies are ignored; `TENANT_ID` is server configuration. In production, set `AUTH_MODE=jwt`; Cedar validates the configured issuer, audience, and JWKS, then derives the tenant from `AUTH_TENANT_CLAIM`. Do not embed `API_TOKEN` in the Expo bundle.
 
 ```bash
 curl -H "Authorization: Bearer $API_TOKEN" -H 'content-type: application/json' \
@@ -46,7 +46,15 @@ curl -H "Authorization: Bearer $API_TOKEN" -H 'content-type: application/json' \
   http://localhost:3000/monitors
 ```
 
-Endpoints: `POST /monitors`, `GET /monitors`, `PATCH /monitors/:id`, `POST /monitors/:id/run`, `GET /executions/:id`, `GET /findings?monitorId=...`, and public `GET /health`.
+The original MVP endpoints remain available during migration. New clients should use the versioned API:
+
+- `GET|POST /v1/monitors`, `GET|PATCH /v1/monitors/:id`
+- `POST /v1/monitors/:id/executions`, `GET /v1/monitors/:id/executions`
+- `GET /v1/executions/:id`
+- `GET /v1/findings`, `GET /v1/findings/:id` (includes observation evidence)
+- `GET /v1/me`, plus public `GET /health` and `GET /ready`
+
+All versioned collection responses use `{ data, meta }`; internal tenant IDs and monitor snapshots are excluded from their transport DTOs. An execution records an immutable monitor snapshot when dispatched, so edits made after pressing **Run** do not alter that run's audit trail.
 
 ## Commands
 
@@ -65,13 +73,14 @@ Set `AGENT_MEMORY_ENDPOINT`, `AGENT_MEMORY_CONTEXT`, and `AGENT_MEMORY_API_KEY` 
 
 ## Render deployment
 
-No deployment is performed by this repository setup. `render.yaml` can create the API web service, but Workflow service creation currently requires explicit Render Dashboard or CLI setup:
+The repository-root [`render.yaml`](../render.yaml) defines three independently deployed services: `cedar-web` (Expo static site), `cedar-api` (web service), and `cedar-workflow` (Render Workflow). Each service uses its directory as `rootDir`, so frontend-only changes do not need to rebuild the API.
 
-1. Provision reachable SurrealDB 3.x, apply `npm run migrate`, then run `npm run seed` with production variables.
-2. Create a Render **Workflow** service from this repository. Set its start command to `npm run workflow`, its slug to `cedar-workflow` (or update `RENDER_WORKFLOW_SLUG`), and add the same SurrealDB, tenant, evaluator, and optional Agent Memory variables as the API.
-3. Create an API key with permission to start that workflow and set `RENDER_API_KEY` on the API service. Never set `RENDER_USE_LOCAL_DEV` in production.
-4. Deploy the API from `render.yaml`; fill every `sync: false` secret in the Dashboard. The API and workflow must share `TENANT_ID` and database configuration.
-5. Confirm the Dashboard task slug is exactly `<workflow-slug>/runMonitor`, call `/health`, create a monitor, trigger a run, and poll `/executions/:id`.
+1. Provision a reachable SurrealDB 3.x instance and configure its connection values on both `cedar-api` and `cedar-workflow`.
+2. Configure the JWT issuer, audience, JWKS endpoint, tenant claim, and the web origin allowlist on `cedar-api`.
+3. Configure `RENDER_API_KEY` and `RENDER_WORKFLOW_SLUG=cedar-workflow` only on `cedar-api`.
+4. Configure the evaluator, Agent Memory, and connector secrets only on `cedar-workflow`.
+5. Set `EXPO_PUBLIC_API_URL` to the API's HTTPS URL on `cedar-web`. It is public build-time configuration, never a secret.
+6. Deploy the Blueprint. The API's pre-deploy command applies ordered database migrations. Then run a smoke test: `/health` → authenticated `/v1/monitors` → create execution → poll `/v1/executions/:id`.
 
 Render docs: [Workflows](https://render.com/docs/workflows), [TypeScript SDK](https://render.com/docs/workflows-sdk-typescript), and [local development](https://render.com/docs/workflows-local-development). SurrealDB references: [JavaScript SDK](https://surrealdb.com/docs/sdk/javascript) and [Agent Memory JavaScript SDK](https://surrealdb.com/docs/agent-memory/reference/sdk-javascript).
 

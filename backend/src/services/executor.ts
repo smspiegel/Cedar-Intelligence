@@ -11,7 +11,9 @@ export class MonitorExecutor {
     const running: ExecutionRecord = { ...execution, status: "running", startedAt: execution.startedAt ?? now() };
     await this.repo.updateExecution(running);
     try {
-      const monitor = await this.repo.getMonitor(execution.tenantId, execution.monitorId);
+      // Executions are an audit boundary: once queued, changes to a monitor must not
+      // change what that already-dispatched execution collects or evaluates.
+      const monitor = execution.monitorSnapshot ?? await this.repo.getMonitor(execution.tenantId, execution.monitorId);
       if (!monitor) throw new Error("Monitor no longer exists");
       const org = await this.repo.getOrganization(execution.tenantId);
       if (!org) throw new Error("Organization context not found");

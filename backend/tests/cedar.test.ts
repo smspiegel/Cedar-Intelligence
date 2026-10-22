@@ -16,7 +16,7 @@ class RuleEvaluator implements FindingEvaluator {
 }
 const contexts: ContextProvider = { async retrieve(org, monitor) { return { text: `${org.context}\n${monitor.context}`, reference: "test-context" }; } };
 const config: AppConfig = {
-  NODE_ENV: "test", PORT: 3000, API_TOKEN: "test-api-token", TENANT_ID: "tenant-a",
+  NODE_ENV: "test", PORT: 3000, AUTH_MODE: "development", API_TOKEN: "test-api-token", AUTH_TENANT_CLAIM: "org_id", CORS_ORIGINS: [], TENANT_ID: "tenant-a",
   SURREAL_URL: "ws://localhost:8000/rpc", SURREAL_NAMESPACE: "cedar", SURREAL_DATABASE: "cedar", SURREAL_USERNAME: "root", SURREAL_PASSWORD: "root",
   RENDER_WORKFLOW_SLUG: "cedar", EVALUATOR_MODEL: "test", SEEDED_CONTEXT: "seed",
 };
@@ -44,6 +44,23 @@ describe("Cedar monitor execution", () => {
     const updated = await service.patch("tenant-a", m.id, { priority: "P1", sources: [{ type: "mock", key: "feed", fixture: "changed" }] });
     await execute(updated!); expect((await repo.listFindings("tenant-a")).map(f => f.priority).sort()).toEqual(["P1", "P3"]);
   });
+  it("executes the monitor snapshot captured at dispatch time", async () => {
+    const m = await monitor("matching", "P2");
+    const execution = await service.run("tenant-a", m.id);
+    await service.patch("tenant-a", m.id, { priority: "P1", sources: [{ type: "mock", key: "feed", fixture: "nonmatching" }] });
+    await executor.execute(execution.id);
+    expect(await repo.getExecution("tenant-a", execution.id)).toMatchObject({ monitorVersion: 1, status: "completed" });
+    expect(await repo.listFindings("tenant-a")).toMatchObject([{ priority: "P2", monitorId: m.id }]);
+  });
+  it("returns the original execution for an idempotent dispatch", async () => {
+    let starts = 0;
+    const idempotentService = new MonitorService(repo, { async start() { starts += 1; return "run"; } });
+    const m = await idempotentService.create("tenant-a", { name: "Launch", instructions: "Find Project Birch launches", priority: "P2", sources: [{ type: "mock", key: "feed", fixture: "matching" }] });
+    const first = await idempotentService.run("tenant-a", m.id, "client-press-1");
+    const second = await idempotentService.run("tenant-a", m.id, "client-press-1");
+    expect(second.id).toBe(first.id);
+    expect(starts).toBe(1);
+  });
   it("allows organization context to affect evaluation", async () => {
     const m = await monitor(); await repo.putOrganization({ id: "tenant-a", name: "A", context: "ignore launches" }); await execute(m);
     expect(await repo.listFindings("tenant-a")).toHaveLength(0);
@@ -62,5 +79,28 @@ describe("Cedar monitor execution", () => {
     expect((await app.inject({ method: "GET", url: `/executions/missing`, headers: { authorization: "Bearer test-api-token", "x-tenant-id": "tenant-b" } })).statusCode).toBe(404);
     expect((await app.inject({ method: "GET", url: "/monitors", headers: { authorization: "Bearer test-api-token", "x-tenant-id": "tenant-b" } })).json()).toMatchObject([{ id: m.id, tenantId: "tenant-a" }]);
     expect((await app.inject({ method: "GET", url: "/monitors" })).statusCode).toBe(401); await app.close();
+  });
+  it("serves a versioned monitor read model without tenant internals", async () => {
+    const m = await monitor();
+    const app = buildApp(config, repo, { async start() { return "run"; } });
+    const response = await app.inject({ method: "GET", url: "/v1/monitors", headers: { authorization: "Bearer test-api-token" } });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ data: [{ id: m.id, lastExecution: null }], meta: { hasMore: false } });
+    expect(response.json().data[0]).not.toHaveProperty("tenantId");
+    const started = await app.inject({ method: "POST", url: `/v1/monitors/${m.id}/executions`, headers: { authorization: "Bearer test-api-token" } });
+    expect(started.statusCode).toBe(202);
+    expect(started.headers.location).toContain("/v1/executions/");
+    await app.close();
+  });
+  it("requires an optimistic concurrency version for v1 monitor edits", async () => {
+    const m = await monitor();
+    const app = buildApp(config, repo, { async start() { return "run"; } });
+    const missingVersion = await app.inject({ method: "PATCH", url: `/v1/monitors/${m.id}`, headers: { authorization: "Bearer test-api-token" }, payload: { name: "Changed" } });
+    expect(missingVersion.statusCode).toBe(428);
+    const updated = await app.inject({ method: "PATCH", url: `/v1/monitors/${m.id}`, headers: { authorization: "Bearer test-api-token", "if-match": "1" }, payload: { name: "Changed" } });
+    expect(updated.statusCode).toBe(200);
+    const stale = await app.inject({ method: "PATCH", url: `/v1/monitors/${m.id}`, headers: { authorization: "Bearer test-api-token", "if-match": "1" }, payload: { name: "Changed again" } });
+    expect(stale.statusCode).toBe(409);
+    await app.close();
   });
 });

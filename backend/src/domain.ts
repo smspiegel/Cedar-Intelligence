@@ -22,6 +22,9 @@ export type Monitor = z.infer<typeof Monitor>;
 
 export const ExecutionRecord = z.object({
   id: z.string(), tenantId: z.string(), monitorId: z.string(), monitorVersion: z.number(),
+  // New executions carry the exact monitor definition that was dispatched. The optional
+  // field keeps previously persisted MVP executions readable during migration.
+  monitorSnapshot: Monitor.optional(),
   renderRunId: z.string().optional(), status: z.enum(["queued", "running", "completed", "failed"]),
   createdAt: z.string().datetime(), startedAt: z.string().datetime().optional(),
   completedAt: z.string().datetime().optional(), error: z.string().optional(),

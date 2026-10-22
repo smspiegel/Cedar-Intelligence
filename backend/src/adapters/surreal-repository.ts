@@ -16,6 +16,7 @@ export class SurrealRepository implements Repository {
     return new SurrealRepository(db, config);
   }
   async initialize() { /* Run `npm run migrate`; intentionally no hidden schema mutation at startup. */ }
+  async ping() { await this.db.query("RETURN true"); }
   async close() { await this.db.close(); }
   private async one<T>(table: string, key: string): Promise<T | null> {
     const [rows] = await this.db.query<[Array<T & { key: string }>]>(`SELECT * OMIT id FROM ${table} WHERE key = $key LIMIT 1`, { key });
@@ -31,16 +32,53 @@ export class SurrealRepository implements Repository {
   async getMonitor(t: string, id: string) { const v = await this.one<Monitor>("monitor", id); return v?.tenantId === t ? v : null; }
   async listMonitors(t: string) { const [r] = await this.db.query<[Array<Monitor & { key: string }>]>("SELECT * OMIT id FROM monitor WHERE tenantId = $tenant ORDER BY createdAt", { tenant: t }); return r.map(x => withoutRecordId(x) as Monitor); }
   async updateMonitor(v: Monitor) { await this.put("monitor", v); }
+  async updateMonitorIfVersion(v: Monitor, expectedVersion: number) {
+    const { id, ...data } = v;
+    const [rows] = await this.db.query<[Array<Monitor>]>(
+      "UPDATE monitor CONTENT $data WHERE key = $key AND version = $expected RETURN AFTER",
+      { data: { ...data, key: id }, key: id, expected: expectedVersion },
+    );
+    return rows.length === 1;
+  }
   async createExecution(v: ExecutionRecord) { await this.put("execution", v, true); }
   async getExecution(t: string, id: string) { const v = await this.one<ExecutionRecord>("execution", id); return v?.tenantId === t ? v : null; }
   async getExecutionInternal(id: string) { return this.one<ExecutionRecord>("execution", id); }
+  async listExecutions(t: string, monitorId?: string, limit = 50) {
+    const where = monitorId ? "tenantId = $tenant AND monitorId = $monitor" : "tenantId = $tenant";
+    const [r] = await this.db.query<[Array<ExecutionRecord & { key: string }>]>(
+      `SELECT * OMIT id FROM execution WHERE ${where} ORDER BY createdAt DESC LIMIT $limit`,
+      { tenant: t, monitor: monitorId, limit },
+    );
+    return r.map(x => withoutRecordId(x) as ExecutionRecord);
+  }
   async updateExecution(v: ExecutionRecord) { await this.put("execution", v); }
   async putObservation(v: Observation) { return this.insertOnce("observation", v); }
   async putEvaluation(v: Evaluation) { await this.put("evaluation", v); }
   async putFinding(v: Finding) { return this.insertOnce("finding", v); }
-  private async insertOnce(table: string, v: { id: string }) { if (await this.one(table, v.id)) return false; await this.put(table, v, true); return true; }
+  private async insertOnce(table: string, v: { id: string }) {
+    const { id, ...data } = v;
+    // A single insert statement makes replay protection safe when workflow retries
+    // overlap. RETURN BEFORE is empty for a new record and returns the existing row
+    // when the table's unique key index sees a duplicate.
+    const [before] = await this.db.query<[Array<{ key: string }>]>(
+      `INSERT INTO ${table} $data ON DUPLICATE KEY UPDATE key = key RETURN BEFORE`,
+      { data: { ...data, key: id } },
+    );
+    return before.length === 0;
+  }
   async listFindings(t: string, monitorId?: string) {
-    const [r] = await this.db.query<[Array<Finding & { key: string }>]>("SELECT * OMIT id FROM finding WHERE tenantId = $tenant AND ($monitor = NONE OR monitorId = $monitor) ORDER BY createdAt DESC", { tenant: t, monitor: monitorId });
+    const where = monitorId ? "tenantId = $tenant AND monitorId = $monitor" : "tenantId = $tenant";
+    const [r] = await this.db.query<[Array<Finding & { key: string }>]>(`SELECT * OMIT id FROM finding WHERE ${where} ORDER BY createdAt DESC`, { tenant: t, monitor: monitorId });
     return r.map(x => withoutRecordId(x) as Finding);
+  }
+  async getFinding(t: string, id: string) { const v = await this.one<Finding>("finding", id); return v?.tenantId === t ? v : null; }
+  async getObservations(t: string, ids: string[]) {
+    if (ids.length === 0) return [];
+    const [r] = await this.db.query<[Array<Observation & { key: string }>]>(
+      "SELECT * OMIT id FROM observation WHERE tenantId = $tenant AND key IN $ids",
+      { tenant: t, ids },
+    );
+    const byId = new Map(r.map(row => [row.key, withoutRecordId(row) as Observation]));
+    return ids.flatMap(id => byId.get(id) ? [byId.get(id)!] : []);
   }
 }
