@@ -4,6 +4,7 @@ services:
     runtime: node
     region: oregon
     plan: 0.5c-512mb
+    autoDeployTrigger: commit
     rootDir: backend
     buildCommand: npm ci --include=dev && npm run build
     preDeployCommand: npm run migrate
@@ -45,6 +46,7 @@ services:
     name: cedar-workflow
     runtime: node
     region: oregon
+    autoDeployTrigger: commit
     rootDir: backend
     buildCommand: npm ci --include=dev && npm run build
     startCommand: npm run workflow
@@ -77,8 +79,9 @@ services:
         sync: false
 
   - type: web
-    name: cedar-web
+    name: Cedar-Intelligence
     runtime: static
+    autoDeployTrigger: commit
     rootDir: frontend
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
