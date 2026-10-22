@@ -43,7 +43,6 @@ services:
 
   - type: workflow
     name: cedar-workflow
-    slug: cedar-workflow
     runtime: node
     region: oregon
     rootDir: backend
