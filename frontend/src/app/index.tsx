@@ -1,7 +1,9 @@
 import { useAuth, useClerk } from '@clerk/expo';
+import { GlassView, isGlassEffectAPIAvailable } from 'expo-glass-effect';
 import { Redirect } from 'expo-router';
-import { createElement, useState } from 'react';
+import { createElement, useEffect, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import Animated, { cancelAnimation, Easing, useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
 import { competitors, initialPriorities, initialSources, intelligence as fixture, opportunities, topics, type Intelligence, type Kind, type Opportunity } from '@/cedar-data';
 
 type ScreenName = 'intelligence' | 'detail' | 'competitors' | 'competitor' | 'topics' | 'topic' | 'content' | 'deck' | 'context' | 'incident' | 'settings';
@@ -73,7 +75,28 @@ function Button({ text, press, primary = false, danger = false }: { text: string
 function Glyph({ name, color = C.text, size = 18 }: { name: GlyphName; color?: string; size?: number }) { return <View style={[s.glyph, { width: size, height: size }]}>{createElement('svg', { xmlns: 'http://www.w3.org/2000/svg', width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: color, strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true, focusable: false }, glyph[name].map((d, index) => createElement('path', { d, key: index })))}</View>; }
 function GlyphButton({ name, press, color = C.text, hint }: { name: GlyphName; press: () => void; color?: string; hint?: string }) { const [hovered, setHovered] = useState(false); const cedar = name === 'cedar'; return <View style={interaction.glyphControl}><Pressable onPress={press} accessibilityRole="button" accessibilityLabel={hint ?? name} accessibilityHint={hint} onHoverIn={() => setHovered(true)} onHoverOut={() => setHovered(false)} style={[s.icon, cedar && s.cedarOrb, hovered && (cedar ? s.cedarOrbHover : interaction.glyphButtonHover)]}><Glyph name={name} color={cedar ? C.abyss : color} size={cedar ? 15 : 18} /></Pressable>{hint && hovered && <View pointerEvents="none" style={interaction.hoverHint}><Text style={interaction.hoverHintText}>{hint}</Text></View>}</View>; }
 function Badge({ kind }: { kind: Kind }) { const [color, backgroundColor] = kindColor(kind); return <View style={[s.badge, { backgroundColor }]}><Text style={[s.badgeText, { color }]}>{kind.toUpperCase()}</Text></View>; }
-function Page({ children }: { children: React.ReactNode }) { return <ScrollView style={layout.pageScroller} contentContainerStyle={layout.pageContent}><View style={[s.page, layout.page]}><View style={s.workspaceFrame}>{children}</View></View></ScrollView>; }
+function LavaBackdrop() {
+  const slowDrift = useSharedValue(0); const rise = useSharedValue(0); const pulse = useSharedValue(0);
+  useEffect(() => {
+    const ease = Easing.inOut(Easing.sin);
+    slowDrift.value = withRepeat(withSequence(withTiming(1, { duration: 12600, easing: ease }), withTiming(0, { duration: 12600, easing: ease })), -1, false);
+    rise.value = withRepeat(withSequence(withTiming(1, { duration: 9800, easing: ease }), withTiming(0, { duration: 9800, easing: ease })), -1, true);
+    pulse.value = withRepeat(withSequence(withTiming(1, { duration: 7400, easing: ease }), withTiming(0, { duration: 7400, easing: ease })), -1, true);
+    return () => { cancelAnimation(slowDrift); cancelAnimation(rise); cancelAnimation(pulse); };
+  }, [pulse, rise, slowDrift]);
+  const cedarBlob = useAnimatedStyle(() => ({ transform: [{ translateX: -65 + slowDrift.value * 130 }, { translateY: 28 - rise.value * 82 }, { scale: .96 + pulse.value * .12 }] }));
+  const fernBlob = useAnimatedStyle(() => ({ transform: [{ translateX: 26 - slowDrift.value * 100 }, { translateY: -54 + rise.value * 118 }, { scale: 1 + pulse.value * .14 }] }));
+  const mintBlob = useAnimatedStyle(() => ({ transform: [{ translateX: -20 + rise.value * 80 }, { translateY: 44 - pulse.value * 92 }, { scale: .9 + slowDrift.value * .17 }] }));
+  return <View pointerEvents="none" style={s.lavaBackdrop}><View style={s.lavaAtmosphere} /><View style={s.lavaCluster}><Animated.View style={[s.lavaBlob, s.lavaCedar, cedarBlob]} /><Animated.View style={[s.lavaBlob, s.lavaFern, fernBlob]} /><Animated.View style={[s.lavaBlob, s.lavaMint, mintBlob]} /><View style={[s.lavaBlob, s.lavaLeaf]} /><View style={[s.lavaBlob, s.lavaPale]} /><View style={[s.lavaBlob, s.lavaMoss]} /></View><View style={s.lavaVignette} /></View>;
+}
+function WorkspaceFrame({ children }: { children: React.ReactNode }) {
+  const canUseNativeGlass = isGlassEffectAPIAvailable();
+  const content = <><LavaBackdrop /><View pointerEvents="none" style={s.glassSheen} /><View style={s.workspaceContent}>{children}</View></>;
+  return canUseNativeGlass
+    ? <GlassView glassEffectStyle="clear" tintColor="rgba(255, 251, 244, 0.26)" style={s.workspaceFrame}>{content}</GlassView>
+    : <View style={[s.workspaceFrame, s.workspaceFrameFallback]}>{content}</View>;
+}
+function Page({ children }: { children: React.ReactNode }) { return <ScrollView style={layout.pageScroller} contentContainerStyle={layout.pageContent}><View style={[s.page, layout.page]}><WorkspaceFrame>{children}</WorkspaceFrame></View></ScrollView>; }
 function Popup({ children, close }: { children: React.ReactNode; close: () => void }) { return <Modal transparent visible animationType="fade" onRequestClose={close}><Pressable style={s.backdrop} onPress={close}><Pressable onPress={(event) => event.stopPropagation()} style={s.popup}>{children}</Pressable></Pressable></Modal>; }
 
 function Sidebar({ route, unread, go, notes, signOut }: { route: Route; unread: number; go: (route: Route) => void; notes: () => void; signOut: () => void }) { const active = route.page === 'detail' ? 'intelligence' : route.page === 'competitor' ? 'competitors' : route.page === 'topic' ? 'context' : route.page; return <View style={s.sidebar}><View style={s.workspace}><View><Text style={s.workspaceName}>cedar</Text><Text style={s.workspaceMeta}>Acme</Text></View></View>{nav.map(([icon, label, page]) => <Pressable key={page} onPress={() => go({ page })} style={[s.nav, active === page && s.navOn]}><View style={s.navIcon}><Glyph name={icon} color={active === page ? C.mint : C.sandstone} size={20} /></View><Text style={[s.navText, active === page && s.navTextOn]}>{label}</Text></Pressable>)}<View style={s.navBottom}><Pressable onPress={() => go({ page: 'settings' })} style={[s.nav, route.page === 'settings' && s.navOn]}><View style={s.navIcon}><Glyph name="settings" color={route.page === 'settings' ? C.mint : C.sandstone} size={16} /></View><Text style={[s.navText, route.page === 'settings' && s.navTextOn]}>Settings</Text></Pressable><Pressable onPress={notes} style={s.nav}><View style={s.navIcon}><Glyph name="bell" color={C.sandstone} size={16} /></View><Text style={s.navText}>Notifications</Text>{unread > 0 && <View style={s.count}><Text style={s.countText}>{unread}</Text></View>}</Pressable><Pressable onPress={signOut} style={s.nav}><View style={s.navIcon}><Glyph name="close" color={C.sandstone} size={16} /></View><Text style={s.navText}>Sign out</Text></Pressable><View style={s.user}><View style={s.avatar}><Text style={s.avatarText}>JA</Text></View><View><Text style={s.userName}>Jordan Avery</Text><Text style={s.workspaceMeta}>Communications Lead</Text></View></View></View></View>; }
@@ -170,7 +193,23 @@ const base = StyleSheet.create({
 const s: any = {
   ...base,
   app: { ...base.app, backgroundColor: C.quartz },
-  workspaceFrame: { width: '100%', gap: 24, padding: 26, borderRadius: 22, borderWidth: 1, borderColor: 'rgba(199,123,69,.22)', backgroundColor: 'rgba(255,253,249,.52)', backgroundImage: 'linear-gradient(135deg, rgba(199,123,69,.035) 20%, rgba(233,200,142,.13) 50%, rgba(199,123,69,.035) 80%)' as never, boxShadow: '0 2px 10px rgba(42,34,28,.035)' as never },
+  // The primary frame is a living backdrop: warm lava shapes sit behind a single
+  // translucent surface so every tab gets the same calm, refractive workspace.
+  workspaceFrame: { width: '100%', position: 'relative', borderRadius: 26, borderWidth: 1, borderColor: 'rgba(255,255,255,.70)', overflow: 'hidden', boxShadow: '0 16px 42px rgba(42,34,28,.10), inset 0 1px 0 rgba(255,255,255,.82)' as never },
+  workspaceFrameFallback: { backgroundColor: 'rgba(255,251,245,.62)', backgroundImage: 'linear-gradient(135deg, rgba(255,255,255,.54), rgba(255,244,228,.20) 45%, rgba(255,255,255,.36))' as never },
+  workspaceContent: { position: 'relative', zIndex: 2, gap: 24, padding: 26 },
+  lavaBackdrop: { ...StyleSheet.absoluteFill, overflow: 'hidden', backgroundColor: '#EDE2D4' },
+  lavaAtmosphere: { ...StyleSheet.absoluteFill, backgroundImage: 'radial-gradient(circle at 18% 22%, #FAFBF8 0%, #F1F3EC 48%, #E2E8DB 100%)' as never },
+  lavaCluster: { position: 'absolute', left: '-14%', top: '-30%', width: '128%', height: '160%', filter: 'blur(15px)' as never },
+  lavaBlob: { position: 'absolute', opacity: .84, borderWidth: 1, borderColor: 'rgba(255,255,255,.22)' },
+  lavaCedar: { width: '62%', height: '50%', left: '1%', top: '4%', borderRadius: 260, backgroundColor: '#52763A', backgroundImage: 'linear-gradient(145deg, #365C20 0%, #6B904B 72%, #A8C984 100%)' as never },
+  lavaFern: { width: '70%', height: '55%', right: '-12%', top: '25%', borderRadius: 300, backgroundColor: '#8CAD6B', backgroundImage: 'linear-gradient(155deg, #567C3C 0%, #92B871 58%, #CEE7AE 100%)' as never },
+  lavaMint: { width: '56%', height: '46%', left: '18%', bottom: '-8%', borderRadius: 260, backgroundColor: '#B7D99A', backgroundImage: 'linear-gradient(130deg, #7FA064 0%, #C0E2A1 62%, #E5F0C5 100%)' as never },
+  lavaLeaf: { width: '35%', height: '23%', left: '-3%', top: '48%', borderRadius: 180, backgroundColor: '#7F9D61' },
+  lavaPale: { width: '29%', height: '25%', right: '7%', top: '-3%', borderRadius: 160, backgroundColor: '#CEE7B2' },
+  lavaMoss: { width: '25%', height: '27%', right: '23%', bottom: '-10%', borderRadius: 170, backgroundColor: '#608344' },
+  lavaVignette: { ...StyleSheet.absoluteFill, backgroundImage: 'linear-gradient(110deg, rgba(255,255,255,.14), rgba(255,255,255,.42) 52%, rgba(255,251,244,.18))' as never },
+  glassSheen: { position: 'absolute', zIndex: 1, left: 0, right: 0, top: 0, height: '42%', backgroundImage: 'linear-gradient(180deg, rgba(255,255,255,.34), rgba(255,255,255,.06))' as never, borderBottomWidth: 1, borderColor: 'rgba(255,255,255,.30)' },
   card: { ...base.card, backgroundColor: 'rgba(255,253,249,.72)', backgroundImage: 'linear-gradient(135deg, rgba(199,123,69,.045) 20%, rgba(233,200,142,.13) 50%, rgba(199,123,69,.045) 80%)' as never, borderColor: 'rgba(199,123,69,.24)', borderRadius: 14, boxShadow: '0 2px 8px rgba(42,34,28,.035)' as never },
   historyCard: { paddingHorizontal: 20, paddingVertical: 18 },
   workspace: { ...base.workspace, paddingTop: 30, paddingBottom: 34, flexDirection: 'column', alignItems: 'flex-start', gap: 54 },
