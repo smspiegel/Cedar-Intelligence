@@ -1,15 +1,18 @@
 import { useAuth, useClerk } from '@clerk/expo';
+import Slider from '@react-native-community/slider';
 import { Redirect } from 'expo-router';
-import { createElement, useEffect, useState } from 'react';
+import { createContext, createElement, useContext, useEffect, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, { cancelAnimation, Easing, useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
 import { competitors, initialPriorities, initialSources, intelligence as fixture, opportunities, topics, type Intelligence, type Kind, type Opportunity } from '@/cedar-data';
+import { defaultGlassSettings, glassLimits, glassSteps, type GlassSettings } from '@/glass-settings';
 import { LiquidGlassSurface } from '@/liquid-glass-surface';
 import { ManropeText as Text, ManropeTextInput as TextInput } from '@/typography';
 
 type ScreenName = 'intelligence' | 'detail' | 'competitors' | 'competitor' | 'topics' | 'topic' | 'content' | 'deck' | 'context' | 'incident' | 'settings';
 type Route = { page: ScreenName; id?: string };
 type Draft = { title: string; note: string; body: string; sources: string[] };
+const GlassSettingsContext = createContext<GlassSettings>(defaultGlassSettings);
 const C = {
   abyss: '#08201A', bark: '#2A221C', copper: '#C77B45', copperLight: '#E9C88E', rust: '#A8502A',
   quartz: '#F7F2EA', sandstone: '#E8DDCB', mint: '#6EDDB0', oldGrowth: '#13382A',
@@ -45,6 +48,7 @@ function AuthenticatedApp() {
 function CedarWorkspace({ signOut = () => {} }: { signOut?: () => void }) {
   const { width } = useWindowDimensions(); const mobile = width < 1024;
   const [route, setRoute] = useState<Route>({ page: 'intelligence' }); const [items, setItems] = useState(fixture);
+  const [glassSettings, setGlassSettings] = useState<GlassSettings>(defaultGlassSettings);
   const [attached, setAttached] = useState<string[]>([]); const [drawer, setDrawer] = useState(false); const [menu, setMenu] = useState(false); const [notes, setNotes] = useState(false); const [draft, setDraft] = useState<Draft | null>(null);
   const [priorities, setPriorities] = useState(initialPriorities); const [sources, setSources] = useState(initialSources); const [audit, setAudit] = useState(['Jordan moved “Enterprise launch” to priority #1', 'Jordan approved Cedar suggestion: “Add AI safety monitoring”', 'Jordan replaced Competitive Analysis Q3']);
   const [tasks, setTasks] = useState([{ id: 'a', title: 'Prepare executive briefing', done: false }, { id: 'b', title: 'Align external messaging', done: false }, { id: 'c', title: 'Monitor escalation triggers', done: true }, { id: 'd', title: 'Brief customer-facing teams (internal only)', done: false }]);
@@ -66,7 +70,22 @@ function CedarWorkspace({ signOut = () => {} }: { signOut?: () => void }) {
     if (route.page === 'incident') return <Incident tasks={tasks} setTasks={setTasks} back={() => go({ page: 'detail', id: 'io-1' })} draft={openDraft} />;
     return <Settings audit={audit} />;
   })();
-  return <View style={s.app}>{mobile && <View style={s.mobileBar}><GlyphButton name="menu" color={C.sandstone} hint="Open navigation" press={() => setMenu(true)} /><Text style={s.brand}>Cedar</Text><GlyphButton name="cedar" color={C.mint} hint="Open Cedar" press={() => setDrawer(true)} /></View>}<View style={s.shell}>{!mobile && <Sidebar route={route} unread={unread} go={go} notes={() => setNotes(true)} signOut={signOut} />}<View style={s.main}>{view}</View>{drawer && <CedarDrawer mobile={mobile} items={attached.map((id) => getObject(items, id)).filter(Boolean) as Intelligence[]} remove={attach} close={() => setDrawer(false)} />}</View>{menu && <Popup close={() => setMenu(false)}><Sidebar route={route} unread={unread} go={go} notes={() => { setMenu(false); setNotes(true); }} signOut={signOut} /></Popup>}{notes && <Notifications close={() => setNotes(false)} open={(next) => { setRead((all) => [...all, next]); setNotes(false); go(next === 'n-2' ? { page: 'incident' } : { page: 'detail', id: next === 'n-3' ? 'io-6' : 'io-1' }); }} />}{draft && <DraftModal draft={draft} close={() => setDraft(null)} />}</View>;
+  return <GlassSettingsContext.Provider value={glassSettings}>
+    <View style={s.app}>
+      {mobile && <View style={s.mobileBar}><GlyphButton name="menu" color={C.sandstone} hint="Open navigation" press={() => setMenu(true)} /><Text style={s.brand}>Cedar</Text><GlyphButton name="cedar" color={C.mint} hint="Open Cedar" press={() => setDrawer(true)} /></View>}
+      <View style={s.shell}>
+        {!mobile && <Sidebar route={route} unread={unread} go={go} notes={() => setNotes(true)} signOut={signOut} />}
+        <View style={s.main}>
+          {view}
+          <GlassTuner mobile={mobile} settings={glassSettings} setSettings={setGlassSettings} />
+        </View>
+        {drawer && <CedarDrawer mobile={mobile} items={attached.map((id) => getObject(items, id)).filter(Boolean) as Intelligence[]} remove={attach} close={() => setDrawer(false)} />}
+      </View>
+      {menu && <Popup close={() => setMenu(false)}><Sidebar route={route} unread={unread} go={go} notes={() => { setMenu(false); setNotes(true); }} signOut={signOut} /></Popup>}
+      {notes && <Notifications close={() => setNotes(false)} open={(next) => { setRead((all) => [...all, next]); setNotes(false); go(next === 'n-2' ? { page: 'incident' } : { page: 'detail', id: next === 'n-3' ? 'io-6' : 'io-1' }); }} />}
+      {draft && <DraftModal draft={draft} close={() => setDraft(null)} />}
+    </View>
+  </GlassSettingsContext.Provider>;
 }
 
 function T({ children, h = false }: { children: React.ReactNode; h?: boolean }) { return <Text style={h ? s.h1 : s.h2}>{children}</Text>; }
@@ -91,12 +110,59 @@ function LavaBackdrop() {
   return <View pointerEvents="none" style={s.lavaBackdrop}><View style={s.lavaAtmosphere} /><View style={s.lavaCluster}><Animated.View style={[s.lavaBlob, s.lavaCedar, cedarBlob]} /><Animated.View style={[s.lavaBlob, s.lavaFern, fernBlob]} /><Animated.View style={[s.lavaBlob, s.lavaMint, mintBlob]} /><View style={[s.lavaBlob, s.lavaLeaf]} /><View style={[s.lavaBlob, s.lavaPale]} /><View style={[s.lavaBlob, s.lavaMoss]} /></View><View style={s.lavaVignette} /></View>;
 }
 function WorkspaceFrame({ children }: { children: React.ReactNode }) {
+  const settings = useContext(GlassSettingsContext);
   return <View style={s.workspaceFrame}>
     <LavaBackdrop />
-    <LiquidGlassSurface>
+    <LiquidGlassSurface settings={settings}>
       <View pointerEvents="none" style={s.glassSheen} />
       <View style={s.workspaceContent}>{children}</View>
     </LiquidGlassSurface>
+  </View>;
+}
+function GlassTuner({ mobile, settings, setSettings }: { mobile: boolean; settings: GlassSettings; setSettings: React.Dispatch<React.SetStateAction<GlassSettings>> }) {
+  const [open, setOpen] = useState(false);
+  const update = (key: keyof GlassSettings, value: number) => {
+    if (!Number.isFinite(value)) return;
+    const [minimum, maximum] = glassLimits[key];
+    setSettings((current) => ({ ...current, [key]: Math.max(minimum, Math.min(maximum, value)) }));
+  };
+  const control = (label: string, key: keyof GlassSettings, hint: string) => {
+    const [minimum, maximum] = glassLimits[key];
+    return <View key={key} style={s.glassControl}>
+      <View style={s.glassControlHead}>
+        <View style={s.glassControlCopy}><Text style={s.glassControlLabel}>{label}</Text><Text style={s.glassControlHint}>{hint}</Text></View>
+        <TextInput accessibilityLabel={`${label} glass setting`} keyboardType="decimal-pad" onChangeText={(value) => update(key, Number(value))} selectTextOnFocus style={s.glassInput} value={String(settings[key])} />
+      </View>
+      <Slider
+        accessibilityLabel={`${label} slider`}
+        maximumTrackTintColor="rgba(42,34,28,.14)"
+        maximumValue={maximum}
+        minimumTrackTintColor={C.copper}
+        minimumValue={minimum}
+        onValueChange={(value) => update(key, value)}
+        step={glassSteps[key]}
+        style={s.glassSlider}
+        thumbTintColor={C.rust}
+        value={settings[key]}
+      />
+    </View>;
+  };
+  return <View style={[s.glassTuner, mobile && s.glassTunerMobile]}>
+    <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} onPress={() => setOpen((visible) => !visible)} style={({ pressed }) => [s.glassTunerTrigger, pressed && s.glassTunerTriggerPressed]}>
+      <Text style={s.glassTunerTriggerText}>{open ? 'Close glass controls' : 'Tune glass'}</Text>
+    </Pressable>
+    {open && <View style={s.glassPanel}>
+      <View style={s.glassPanelHead}><View><Text style={s.glassPanelTitle}>Glass material</Text><Text style={s.glassPanelMeta}>Live Chromium preview</Text></View><Pressable accessibilityRole="button" accessibilityLabel="Reset glass settings" onPress={() => setSettings(defaultGlassSettings)}><Text style={s.glassReset}>Reset</Text></Pressable></View>
+      <Text style={s.glassPanelCopy}>Fine-tune the refractive layer without changing the workspace itself.</Text>
+      <View style={s.glassControls}>
+        {control('Refraction', 'displacementScale', '0–80')}
+        {control('Frost', 'blurAmount', '0–0.30')}
+        {control('Saturation', 'saturation', '80–180')}
+        {control('Dispersion', 'aberrationIntensity', '0–3')}
+        {control('Elasticity', 'elasticity', '0–0.25')}
+        {control('Edge definition', 'edgeStrength', '0–1')}
+      </View>
+    </View>}
   </View>;
 }
 function Page({ children }: { children: React.ReactNode }) { return <ScrollView style={layout.pageScroller} contentContainerStyle={layout.pageContent}><View style={[s.page, layout.page]}><WorkspaceFrame>{children}</WorkspaceFrame></View></ScrollView>; }
@@ -196,6 +262,7 @@ const base = StyleSheet.create({
 const s: any = {
   ...base,
   app: { ...base.app, backgroundColor: C.quartz },
+  main: { ...base.main, position: 'relative' },
   // The primary frame is a living backdrop: warm lava shapes sit behind a single
   // translucent surface so every tab gets the same calm, refractive workspace.
   workspaceFrame: { width: '100%', position: 'relative', borderRadius: 26, borderWidth: 1, borderColor: 'rgba(255,255,255,.70)', overflow: 'hidden', boxShadow: '0 6px 8px rgba(30,62,43,.08), inset 0 1px 0 rgba(255,255,255,.82)' as never },
@@ -211,7 +278,28 @@ const s: any = {
   lavaPale: { width: '29%', height: '25%', right: '7%', top: '-3%', borderRadius: 160, backgroundColor: '#CEE7B2' },
   lavaMoss: { width: '25%', height: '27%', right: '23%', bottom: '-10%', borderRadius: 170, backgroundColor: '#608344' },
   lavaVignette: { ...StyleSheet.absoluteFill, backgroundImage: 'linear-gradient(110deg, rgba(255,255,255,.14), rgba(255,255,255,.42) 52%, rgba(255,251,244,.18))' as never },
-  glassSheen: { position: 'absolute', zIndex: 1, left: 0, right: 0, top: 0, height: '42%', backgroundImage: 'linear-gradient(180deg, rgba(255,255,255,.34), rgba(255,255,255,.06))' as never, borderBottomWidth: 1, borderColor: 'rgba(255,255,255,.30)' },
+  // A full-surface radial highlight deliberately fades to transparent. Keeping it
+  // unbounded avoids the visible horizontal terminus a short overlay produces.
+  glassSheen: { ...StyleSheet.absoluteFill, zIndex: 1, backgroundImage: 'radial-gradient(125% 74% at 8% -12%, rgba(255,255,255,.46) 0%, rgba(255,255,255,.16) 34%, rgba(255,255,255,0) 72%)' as never },
+  glassTuner: { position: 'absolute', right: 20, bottom: 20, zIndex: 10, alignItems: 'flex-end', gap: 10 },
+  glassTunerMobile: { left: 12, right: 12, bottom: 12 },
+  glassTunerTrigger: { minHeight: 42, paddingHorizontal: 15, borderRadius: 999, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(8,32,26,.94)', borderWidth: 1, borderColor: 'rgba(233,200,142,.76)', boxShadow: '0 10px 26px rgba(8,32,26,.20)' as never },
+  glassTunerTriggerPressed: { opacity: .84 },
+  glassTunerTriggerText: { color: C.quartz, fontSize: 12.5, fontWeight: '700' },
+  glassPanel: { width: 318, maxWidth: '100%', padding: 16, gap: 12, borderRadius: 18, backgroundColor: 'rgba(255,252,248,.96)', borderWidth: 1, borderColor: 'rgba(199,123,69,.28)', boxShadow: '0 14px 36px rgba(42,34,28,.14)' as never },
+  glassPanelHead: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 14 },
+  glassPanelTitle: { color: C.bark, fontSize: 15, fontWeight: '800' },
+  glassPanelMeta: { marginTop: 2, color: C.faint, fontSize: 10.5, fontWeight: '600' },
+  glassPanelCopy: { color: C.text, fontSize: 11.5, lineHeight: 16 },
+  glassReset: { minHeight: 28, paddingHorizontal: 6, color: C.rust, fontSize: 11.5, fontWeight: '800', textAlignVertical: 'center' },
+  glassControls: { gap: 7 },
+  glassControl: { minHeight: 78, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 5, gap: 3, borderRadius: 10, backgroundColor: '#F6EFE6' },
+  glassControlHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  glassControlCopy: { flex: 1, minWidth: 0 },
+  glassControlLabel: { color: C.bark, fontSize: 11.5, fontWeight: '800' },
+  glassControlHint: { marginTop: 1, color: C.faint, fontSize: 9.5 },
+  glassInput: { width: 76, height: 32, paddingHorizontal: 8, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(199,123,69,.38)', backgroundColor: '#FFFDF9', color: C.bark, fontSize: 12, fontWeight: '700', textAlign: 'right' },
+  glassSlider: { width: '100%', height: 28 },
   card: { ...base.card, backgroundColor: 'rgba(255,253,249,.72)', backgroundImage: 'linear-gradient(135deg, rgba(199,123,69,.045) 20%, rgba(233,200,142,.13) 50%, rgba(199,123,69,.045) 80%)' as never, borderColor: 'rgba(199,123,69,.24)', borderRadius: 14, boxShadow: '0 2px 8px rgba(42,34,28,.035)' as never },
   historyCard: { paddingHorizontal: 20, paddingVertical: 18 },
   workspace: { ...base.workspace, paddingTop: 30, paddingBottom: 34, flexDirection: 'column', alignItems: 'flex-start', gap: 54 },
