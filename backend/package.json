@@ -12,6 +12,7 @@
     "start": "node dist/src/server.js",
     "workflow": "node dist/src/workflow.js",
     "workflow:dev": "render workflows dev -- tsx src/workflow.ts",
+    "schedule": "node dist/scripts/schedule.js",
     "migrate": "tsx scripts/migrate.ts",
     "seed": "tsx scripts/seed.ts",
     "test": "vitest run",
@@ -20,7 +21,6 @@
   "dependencies": {
     "@fastify/cors": "^11.3.1",
     "@renderinc/sdk": "^1.0.0",
-    "@surrealdb/memory": "latest",
     "dotenv": "latest",
     "fastify": "latest",
     "jose": "^6.2.13",

@@ -16,7 +16,10 @@ const withoutTenant = <T extends { tenantId: string }>(value: T): Omit<T, "tenan
   return publicValue;
 };
 
-const monitorDto = (monitor: Monitor) => withoutTenant(monitor);
+const monitorDto = (monitor: Monitor) => {
+  const { deletedAt: _deletedAt, ...value } = withoutTenant(monitor);
+  return value;
+};
 const executionDto = (execution: ExecutionRecord) => {
   const { monitorSnapshot: _monitorSnapshot, ...publicExecution } = withoutTenant(execution);
   return publicExecution;
@@ -45,6 +48,18 @@ const errorBody = (request: FastifyRequest, code: string, message: string, detai
   error: { code, message, ...(details === undefined ? {} : { details }), requestId: request.id },
 });
 
+const isAllowedOrigin = (config: AppConfig, origin: string) => {
+  if (config.CORS_ORIGINS.includes(origin)) return true;
+  if (config.NODE_ENV !== "development") return false;
+  try {
+    const { hostname, protocol } = new URL(origin);
+    return (protocol === "http:" || protocol === "https:")
+      && (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]");
+  } catch {
+    return false;
+  }
+};
+
 export function buildApp(config: AppConfig, repo: Repository, dispatcher: WorkflowDispatcher) {
   const app = Fastify({ logger: config.NODE_ENV !== "test" });
   const service = new MonitorService(repo, dispatcher);
@@ -55,7 +70,7 @@ export function buildApp(config: AppConfig, repo: Repository, dispatcher: Workfl
     origin: (origin, callback) => {
       // Native clients have no browser Origin header. Web clients must be explicitly allowed.
       if (!origin) return callback(null, true);
-      return callback(null, config.CORS_ORIGINS.includes(origin));
+      return callback(null, isAllowedOrigin(config, origin));
     },
   });
   app.addHook("onRequest", async (request, reply) => {
@@ -66,7 +81,7 @@ export function buildApp(config: AppConfig, repo: Repository, dispatcher: Workfl
   });
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ZodError) return reply.code(400).send(errorBody(request, "VALIDATION_FAILED", "Validation failed", error.issues));
-    if (error instanceof MonitorRunError) return reply.code(error.statusCode).send(errorBody(request, "MONITOR_RUN_FAILED", error.message));
+    if (error instanceof MonitorRunError) return reply.code(error.statusCode).send(errorBody(request, error.code, error.message));
     app.log.error(error);
     return reply.code(500).send(errorBody(request, "INTERNAL", "Internal server error"));
   });
@@ -74,28 +89,16 @@ export function buildApp(config: AppConfig, repo: Repository, dispatcher: Workfl
   app.get("/health", async () => ({ status: "ok" }));
   app.get("/ready", async () => { await repo.ping(); return { status: "ready" }; });
 
-  // Existing MVP routes remain available for a short migration window.
-  app.post("/monitors", async (request, reply) => reply.code(201).send(await service.create(request.auth.tenantId, request.body)));
-  app.get("/monitors", async request => service.list(request.auth.tenantId));
-  app.patch<{ Params: { id: string } }>("/monitors/:id", async (request, reply) => {
-    const value = await service.patch(request.auth.tenantId, request.params.id, request.body);
-    return value ?? reply.code(404).send(errorBody(request, "NOT_FOUND", "Monitor not found"));
-  });
-  app.post<{ Params: { id: string } }>("/monitors/:id/run", async (request, reply) => reply.code(202).send(await service.run(request.auth.tenantId, request.params.id)));
-  app.get<{ Params: { id: string } }>("/executions/:id", async (request, reply) => {
-    const value = await repo.getExecution(request.auth.tenantId, request.params.id);
-    return value ?? reply.code(404).send(errorBody(request, "NOT_FOUND", "Execution not found"));
-  });
-  app.get<{ Querystring: { monitorId?: string } }>("/findings", async request => repo.listFindings(request.auth.tenantId, request.query.monitorId));
-
   app.get("/v1/me", async request => ({ data: { tenantId: request.auth.tenantId, subject: request.auth.subject, roles: request.auth.roles } }));
   app.get<{ Querystring: { limit?: string } }>("/v1/monitors", async request => {
     const monitors = await service.list(request.auth.tenantId);
     const limit = clampLimit(request.query.limit);
     const page = monitors.slice(0, limit);
     const data = await Promise.all(page.map(async monitor => {
-      const [lastExecution] = await repo.listExecutions(request.auth.tenantId, monitor.id, 1);
-      return { ...monitorDto(monitor), lastExecution: lastExecution ? executionDto(lastExecution) : null };
+      const [[lastExecution], findingsCount] = await Promise.all([
+        repo.listExecutions(request.auth.tenantId, monitor.id, 1), repo.countFindings(request.auth.tenantId, monitor.id),
+      ]);
+      return { ...monitorDto(monitor), lastExecution: lastExecution ? executionDto(lastExecution) : null, findingsCount };
     }));
     return { data, meta: { limit, hasMore: monitors.length > page.length } };
   });
@@ -115,6 +118,10 @@ export function buildApp(config: AppConfig, repo: Repository, dispatcher: Workfl
     const monitor = await service.patch(request.auth.tenantId, request.params.id, request.body, version);
     if (!monitor) return reply.code(404).send(errorBody(request, "NOT_FOUND", "Monitor not found"));
     return { data: monitorDto(monitor) };
+  });
+  app.delete<{ Params: { id: string } }>("/v1/monitors/:id", async (request, reply) => {
+    if (!await service.remove(request.auth.tenantId, request.params.id)) return reply.code(404).send(errorBody(request, "NOT_FOUND", "Monitor not found"));
+    return reply.code(204).send();
   });
   app.post<{ Params: { id: string } }>("/v1/monitors/:id/executions", async (request, reply) => {
     const execution = await service.run(request.auth.tenantId, request.params.id, idempotencyKey(request.headers["idempotency-key"]));
@@ -138,7 +145,7 @@ export function buildApp(config: AppConfig, repo: Repository, dispatcher: Workfl
   app.get<{ Params: { id: string } }>("/v1/findings/:id", async (request, reply) => {
     const finding = await repo.getFinding(request.auth.tenantId, request.params.id);
     if (!finding) return reply.code(404).send(errorBody(request, "NOT_FOUND", "Finding not found"));
-    const observations = await repo.getObservations(request.auth.tenantId, finding.observationIds);
+    const observations = await repo.getObservations(request.auth.tenantId, [finding.observationId]);
     return { data: { ...findingDto(finding), observations: observations.map(observationDto) } };
   });
 

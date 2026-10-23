@@ -1,18 +1,17 @@
 import { useAuth, useClerk } from '@clerk/expo';
-import Slider from '@react-native-community/slider';
 import { Redirect } from 'expo-router';
-import { createContext, createElement, useContext, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Image, Modal, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { createContext, createElement, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Image, Linking, Modal, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, { cancelAnimation, Easing, useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
 import { competitors, initialPriorities, initialSources, intelligence as fixture, opportunities, topics, type Intelligence, type Kind, type Opportunity } from '@/cedar-data';
-import { defaultGlassSettings, glassLimits, glassSteps, type GlassSettings } from '@/glass-settings';
+import { CedarApi, createClerkApi, createDevelopmentApi, type Bucket, type Finding, type Monitor, type MonitorInput } from '@/api/client';
+import { defaultGlassSettings } from '@/glass-settings';
 import { LiquidGlassSurface } from '@/liquid-glass-surface';
 import { ManropeText as Text, ManropeTextInput as TextInput } from '@/typography';
 
-type ScreenName = 'intelligence' | 'detail' | 'competitors' | 'competitor' | 'topics' | 'topic' | 'content' | 'deck' | 'context' | 'incident' | 'settings';
+type ScreenName = 'intelligence' | 'detail' | 'monitors' | 'monitor' | 'monitor-edit' | 'competitors' | 'competitor' | 'topics' | 'topic' | 'content' | 'deck' | 'context' | 'incident' | 'settings';
 type Route = { page: ScreenName; id?: string };
 type Draft = { title: string; note: string; body: string; sources: string[] };
-const GlassSettingsContext = createContext<GlassSettings>(defaultGlassSettings);
 const forestBackdrop = require('../../assets/images/realimages/forest-blurred.png');
 type NativeView = React.ElementRef<typeof View>;
 type ForestField = { rootRef: React.RefObject<NativeView | null>; width: number };
@@ -27,6 +26,7 @@ const C = {
 const glyph = {
   drag: ['M9 5h.01M15 5h.01M9 12h.01M15 12h.01M9 19h.01M15 19h.01'],
   home: ['M3 10.5 12 3l9 7.5', 'M5 9.5v11h14v-11', 'M9.5 20.5v-6h5v6'],
+  monitors: ['M4 6h16M4 12h16M4 18h10', 'M18 16v4M16 18h4'],
   intelligence: ['M4 4v16h16', 'm7 15 4-5 3 3 4-8'], competitors: ['M4 15 6.5 5h4L12 15l1.5-10h4L20 15', 'M3 15a4 4 0 1 0 8 0 4 4 0 1 0-8 0ZM13 15a4 4 0 1 0 8 0 4 4 0 1 0-8 0ZM11 12h2'],
   topics: ['M9 3 7 21', 'm17 3-2 18', 'M4 9h16', 'M3 15h16'], content: ['M4 5h11v14H4z', 'm9 17 1-4L19.5 3.5a2.1 2.1 0 0 1 3 3L13 16l-4 1Z', 'm17.5 5.5 3 3'],
   context: ['M4 21V3h12v18M16 9h4v12M8 7h3M8 11h3M8 15h3M17 13h1M17 17h1'], settings: ['M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2Z', 'M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z'],
@@ -35,35 +35,52 @@ const glyph = {
   close: ['M6 6l12 12', 'M18 6 6 18'], inbox: ['M4 5h16v14H4z', 'M4 14h5l2 2h2l2-2h5'], deck: ['M5 21V4', 'M5 5h13l-2 3 2 3H5', 'M9 5v6M13 5v6'], calendar: ['M5 4h14v16H5z', 'M8 2v4M16 2v4M5 9h14'], users: ['M16 20v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2', 'M10 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8', 'M16 4a4 4 0 0 1 0 8'],
 } as const;
 type GlyphName = keyof typeof glyph;
-const nav = [['intelligence', 'Intelligence', 'intelligence'], ['competitors', 'Positioning', 'competitors'], ['content', 'Content Advisor', 'content'], ['deck', 'On Deck', 'deck'], ['context', 'Company Context', 'context']] as const;
+const nav = [['intelligence', 'Intelligence', 'intelligence'], ['monitors', 'Monitors', 'monitors'], ['competitors', 'Positioning', 'competitors'], ['content', 'Content Advisor', 'content'], ['deck', 'On Deck', 'deck'], ['context', 'Company Context', 'context']] as const;
 const kindColor = (kind: Kind) => kind === 'threat' ? [C.threat, C.threatBg] : kind === 'flag' ? [C.flag, C.flagBg] : [C.op, C.opBg];
 const getObject = (items: Intelligence[], id?: string) => items.find((item) => item.id === id);
 
-export default function App() { return process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ? <AuthenticatedApp /> : <CedarWorkspace />; }
+const findingToIntelligence = (finding: Finding): Intelligence => ({
+  id: finding.id, kind: finding.bucket, status: 'Developing', headline: finding.title, summary: finding.explanation,
+  updatedAt: new Date(finding.createdAt).toLocaleString(), whatHappened: [finding.explanation],
+  whyItMatters: ['This result matched a monitor trigger configured by your team.'], signals: [finding.sourceUrl],
+  actions: [], topics: [],
+});
+
+export default function App() { return process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ? <AuthenticatedApp /> : <CedarWorkspace api={createDevelopmentApi()} />; }
 
 function AuthenticatedApp() {
-  const { isLoaded, isSignedIn } = useAuth();
+  const { isLoaded, isSignedIn, getToken } = useAuth();
   const { signOut } = useClerk();
+  const api = useMemo(() => createClerkApi(getToken), [getToken]);
   if (!isLoaded) return <View style={{ alignItems: 'center', backgroundColor: C.bg, flex: 1, justifyContent: 'center' }}><ActivityIndicator color={C.ink} size="large" /></View>;
   if (!isSignedIn) return <Redirect href="/sign-in" />;
-  return <CedarWorkspace signOut={() => void signOut()} />;
+  return <CedarWorkspace api={api} signOut={() => void signOut()} />;
 }
 
-function CedarWorkspace({ signOut = () => {} }: { signOut?: () => void }) {
+function CedarWorkspace({ api, signOut = () => {} }: { api: CedarApi | null; signOut?: () => void }) {
   const { width } = useWindowDimensions(); const mobile = width < 1024;
-  const [route, setRoute] = useState<Route>({ page: 'intelligence' }); const [items, setItems] = useState(fixture);
-  const [glassSettings, setGlassSettings] = useState<GlassSettings>(defaultGlassSettings);
+  const [route, setRoute] = useState<Route>({ page: 'intelligence' }); const [items, setItems] = useState(api ? [] : fixture);
+  const [feedError, setFeedError] = useState('');
   const [attached, setAttached] = useState<string[]>([]); const [drawer, setDrawer] = useState(false); const [menu, setMenu] = useState(false); const [notes, setNotes] = useState(false); const [draft, setDraft] = useState<Draft | null>(null);
   const [priorities, setPriorities] = useState(initialPriorities); const [sources, setSources] = useState(initialSources); const [audit, setAudit] = useState(['Jordan moved “Enterprise launch” to priority #1', 'Jordan approved Cedar suggestion: “Add AI safety monitoring”', 'Jordan replaced Competitive Analysis Q3']);
   const [tasks, setTasks] = useState([{ id: 'a', title: 'Prepare executive briefing', done: false }, { id: 'b', title: 'Align external messaging', done: false }, { id: 'c', title: 'Monitor escalation triggers', done: true }, { id: 'd', title: 'Brief customer-facing teams (internal only)', done: false }]);
   const [read, setRead] = useState<string[]>(['n-3']); const unread = 2 - read.filter((id) => id !== 'n-3').length;
+  const refreshFindings = useCallback(async () => {
+    if (!api) return;
+    try { const findings = await api.listFindings(); setFeedError(''); setItems(findings.data.map(findingToIntelligence)); }
+    catch (error) { setFeedError(error instanceof Error ? error.message : 'Could not load findings'); }
+  }, [api]);
+  useEffect(() => { if (!api || route.page !== 'intelligence') return; void api.listFindings().then(result => { setFeedError(''); setItems(result.data.map(findingToIntelligence)); }).catch(error => setFeedError(error instanceof Error ? error.message : 'Could not load findings')); }, [api, route.page]);
   const go = (next: Route) => { setRoute(next); setMenu(false); };
   const attach = (id: string) => { setAttached((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]); if (!attached.includes(id)) setDrawer(true); };
   const openDraft = (title: string, note: string, body: string, sourceTitles: string[] = []) => setDraft({ title, note, body, sources: sourceTitles });
   const complete = (objectId: string, actionId: string) => setItems((current) => current.map((item) => item.id === objectId ? { ...item, actions: item.actions.map((action) => action.id === actionId ? { ...action, status: action.status === 'Complete' ? 'Suggested' : 'Complete' } : action) } : item));
   const view = (() => {
-    if (route.page === 'intelligence') return <Home items={items} open={(id) => go({ page: 'detail', id })} attach={attach} briefing={() => openDraft('Executive briefing — Regulatory inquiry', 'Regulatory inquiry gaining traction on AI data use', briefing(), ['U.S. Senate Committee', 'Wall Street Journal'])} />;
+    if (route.page === 'intelligence') return <Home items={items} error={feedError} demo={!api} open={(id) => go({ page: 'detail', id })} attach={attach} briefing={() => openDraft('Executive briefing — Regulatory inquiry', 'Regulatory inquiry gaining traction on AI data use', briefing(), ['U.S. Senate Committee', 'Wall Street Journal'])} />;
     if (route.page === 'detail') return <Detail item={getObject(items, route.id)} items={items} attached={attached} back={() => go({ page: 'intelligence' })} attach={attach} incident={() => go({ page: 'incident' })} open={(id) => go({ page: 'detail', id })} draft={openDraft} complete={complete} />;
+    if (route.page === 'monitors') return <Monitors api={api} open={(id) => go({ page: 'monitor', id })} create={() => go({ page: 'monitor-edit' })} />;
+    if (route.page === 'monitor') return <MonitorDetail api={api} id={route.id} back={() => go({ page: 'monitors' })} edit={() => go({ page: 'monitor-edit', id: route.id })} refreshFindings={refreshFindings} />;
+    if (route.page === 'monitor-edit') return <MonitorEditor api={api} id={route.id} back={() => go({ page: route.id ? 'monitor' : 'monitors', id: route.id })} saved={(id) => go({ page: 'monitor', id })} />;
     if (route.page === 'competitors') return <Competitors priorities={priorities} open={(id) => go({ page: 'competitor', id })} />;
     if (route.page === 'competitor') return <Competitor item={competitors.find((item) => item.id === route.id)} back={() => go({ page: 'competitors' })} open={(id) => go({ page: 'detail', id })} />;
     if (route.page === 'topics') return <Topics open={(id) => go({ page: 'topic', id })} />;
@@ -74,22 +91,7 @@ function CedarWorkspace({ signOut = () => {} }: { signOut?: () => void }) {
     if (route.page === 'incident') return <Incident tasks={tasks} setTasks={setTasks} back={() => go({ page: 'detail', id: 'io-1' })} draft={openDraft} />;
     return <Settings audit={audit} />;
   })();
-  return <GlassSettingsContext.Provider value={glassSettings}>
-    <View style={s.app}>
-      {mobile && <View style={s.mobileBar}><GlyphButton name="menu" color={C.sandstone} hint="Open navigation" press={() => setMenu(true)} /><Text style={s.brand}>Cedar</Text><GlyphButton name="cedar" color={C.mint} hint="Open Cedar" press={() => setDrawer(true)} /></View>}
-      <View style={s.shell}>
-        {!mobile && <Sidebar route={route} unread={unread} go={go} notes={() => setNotes(true)} signOut={signOut} />}
-        <View style={s.main}>
-          {view}
-          <GlassTuner mobile={mobile} settings={glassSettings} setSettings={setGlassSettings} />
-        </View>
-        {drawer && <CedarDrawer mobile={mobile} items={attached.map((id) => getObject(items, id)).filter(Boolean) as Intelligence[]} remove={attach} close={() => setDrawer(false)} />}
-      </View>
-      {menu && <Popup close={() => setMenu(false)}><Sidebar route={route} unread={unread} go={go} notes={() => { setMenu(false); setNotes(true); }} signOut={signOut} /></Popup>}
-      {notes && <Notifications close={() => setNotes(false)} open={(next) => { setRead((all) => [...all, next]); setNotes(false); go(next === 'n-2' ? { page: 'incident' } : { page: 'detail', id: next === 'n-3' ? 'io-6' : 'io-1' }); }} />}
-      {draft && <DraftModal draft={draft} close={() => setDraft(null)} />}
-    </View>
-  </GlassSettingsContext.Provider>;
+  return <View style={s.app}>{mobile && <View style={s.mobileBar}><GlyphButton name="menu" color={C.sandstone} hint="Open navigation" press={() => setMenu(true)} /><Text style={s.brand}>Cedar</Text><GlyphButton name="cedar" color={C.mint} hint="Open Cedar" press={() => setDrawer(true)} /></View>}<View style={s.shell}>{!mobile && <Sidebar route={route} unread={unread} go={go} notes={() => setNotes(true)} signOut={signOut} />}<View style={s.main}>{view}</View>{drawer && <CedarDrawer mobile={mobile} items={attached.map((id) => getObject(items, id)).filter(Boolean) as Intelligence[]} remove={attach} close={() => setDrawer(false)} />}</View>{menu && <Popup close={() => setMenu(false)}><Sidebar route={route} unread={unread} go={go} notes={() => { setMenu(false); setNotes(true); }} signOut={signOut} /></Popup>}{notes && <Notifications close={() => setNotes(false)} open={(next) => { setRead((all) => [...all, next]); setNotes(false); go(next === 'n-2' ? { page: 'incident' } : { page: 'detail', id: next === 'n-3' ? 'io-6' : 'io-1' }); }} />}{draft && <DraftModal draft={draft} close={() => setDraft(null)} />}</View>;
 }
 
 function T({ children, h = false }: { children: React.ReactNode; h?: boolean }) { return <Text style={h ? s.h1 : s.h2}>{children}</Text>; }
@@ -124,72 +126,66 @@ function LavaBackdrop() {
   const cedarBlob = useAnimatedStyle(() => ({ transform: [{ translateX: -65 + slowDrift.value * 130 }, { translateY: 28 - rise.value * 82 }, { scale: .96 + pulse.value * .12 }] }));
   const fernBlob = useAnimatedStyle(() => ({ transform: [{ translateX: 26 - slowDrift.value * 100 }, { translateY: -54 + rise.value * 118 }, { scale: 1 + pulse.value * .14 }] }));
   const mintBlob = useAnimatedStyle(() => ({ transform: [{ translateX: -20 + rise.value * 80 }, { translateY: 44 - pulse.value * 92 }, { scale: .9 + slowDrift.value * .17 }] }));
-  return <View pointerEvents="none" style={s.lavaBackdrop}><View style={s.lavaCluster}><Animated.View style={[s.lavaBlob, s.lavaCedar, cedarBlob]} /><Animated.View style={[s.lavaBlob, s.lavaFern, fernBlob]} /><Animated.View style={[s.lavaBlob, s.lavaMint, mintBlob]} /><View style={[s.lavaBlob, s.lavaLeaf]} /><View style={[s.lavaBlob, s.lavaPale]} /><View style={[s.lavaBlob, s.lavaMoss]} /></View><View style={s.lavaVignette} /></View>;
+  return <View pointerEvents="none" style={s.lavaBackdrop}><View style={s.lavaAtmosphere} /><View style={s.lavaCluster}><Animated.View style={[s.lavaBlob, s.lavaCedar, cedarBlob]} /><Animated.View style={[s.lavaBlob, s.lavaFern, fernBlob]} /><Animated.View style={[s.lavaBlob, s.lavaMint, mintBlob]} /><View style={[s.lavaBlob, s.lavaLeaf]} /><View style={[s.lavaBlob, s.lavaPale]} /><View style={[s.lavaBlob, s.lavaMoss]} /></View><View style={s.lavaVignette} /></View>;
 }
 function WorkspaceFrame({ children }: { children: React.ReactNode }) {
-  const settings = useContext(GlassSettingsContext);
   return <View style={s.workspaceFrame}>
     <LavaBackdrop />
-    <LiquidGlassSurface settings={settings}>
+    <LiquidGlassSurface settings={defaultGlassSettings}>
       <View pointerEvents="none" style={s.glassSheen} />
       <View style={s.workspaceContent}>{children}</View>
     </LiquidGlassSurface>
   </View>;
 }
-function GlassTuner({ mobile, settings, setSettings }: { mobile: boolean; settings: GlassSettings; setSettings: React.Dispatch<React.SetStateAction<GlassSettings>> }) {
-  const [open, setOpen] = useState(false);
-  const update = (key: keyof GlassSettings, value: number) => {
-    if (!Number.isFinite(value)) return;
-    const [minimum, maximum] = glassLimits[key];
-    setSettings((current) => ({ ...current, [key]: Math.max(minimum, Math.min(maximum, value)) }));
-  };
-  const control = (label: string, key: keyof GlassSettings, hint: string) => {
-    const [minimum, maximum] = glassLimits[key];
-    return <View key={key} style={s.glassControl}>
-      <View style={s.glassControlHead}>
-        <View style={s.glassControlCopy}><Text style={s.glassControlLabel}>{label}</Text><Text style={s.glassControlHint}>{hint}</Text></View>
-        <TextInput accessibilityLabel={`${label} glass setting`} keyboardType="decimal-pad" onChangeText={(value) => update(key, Number(value))} selectTextOnFocus style={s.glassInput} value={String(settings[key])} />
-      </View>
-      <Slider
-        accessibilityLabel={`${label} slider`}
-        maximumTrackTintColor="rgba(42,34,28,.14)"
-        maximumValue={maximum}
-        minimumTrackTintColor={C.copper}
-        minimumValue={minimum}
-        onValueChange={(value) => update(key, value)}
-        step={glassSteps[key]}
-        style={s.glassSlider}
-        thumbTintColor={C.rust}
-        value={settings[key]}
-      />
-    </View>;
-  };
-  return <View style={[s.glassTuner, mobile && s.glassTunerMobile]}>
-    <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} onPress={() => setOpen((visible) => !visible)} style={({ pressed }) => [s.glassTunerTrigger, pressed && s.glassTunerTriggerPressed]}>
-      <Text style={s.glassTunerTriggerText}>{open ? 'Close glass controls' : 'Tune glass'}</Text>
-    </Pressable>
-    {open && <View style={s.glassPanel}>
-      <View style={s.glassPanelHead}><View><Text style={s.glassPanelTitle}>Glass material</Text><Text style={s.glassPanelMeta}>Live Chromium preview</Text></View><Pressable accessibilityRole="button" accessibilityLabel="Reset glass settings" onPress={() => setSettings(defaultGlassSettings)}><Text style={s.glassReset}>Reset</Text></Pressable></View>
-      <Text style={s.glassPanelCopy}>Fine-tune the refractive layer without changing the workspace itself.</Text>
-      <View style={s.glassControls}>
-        {control('Refraction', 'displacementScale', '0–80')}
-        {control('Frost', 'blurAmount', '0–0.30')}
-        {control('Saturation', 'saturation', '80–180')}
-        {control('Dispersion', 'aberrationIntensity', '0–3')}
-        {control('Elasticity', 'elasticity', '0–0.25')}
-        {control('Edge definition', 'edgeStrength', '0–1')}
-      </View>
-    </View>}
-  </View>;
-}
 function Page({ children }: { children: React.ReactNode }) { return <ScrollView style={layout.pageScroller} contentContainerStyle={layout.pageContent}><View style={[s.page, layout.page]}><WorkspaceFrame>{children}</WorkspaceFrame></View></ScrollView>; }
 function Popup({ children, close }: { children: React.ReactNode; close: () => void }) { return <Modal transparent visible animationType="fade" onRequestClose={close}><Pressable style={s.backdrop} onPress={close}><Pressable onPress={(event) => event.stopPropagation()} style={s.popup}>{children}</Pressable></Pressable></Modal>; }
 
-function Sidebar({ route, unread, go, notes, signOut }: { route: Route; unread: number; go: (route: Route) => void; notes: () => void; signOut: () => void }) { const active = route.page === 'detail' ? 'intelligence' : route.page === 'competitor' ? 'competitors' : route.page === 'topic' ? 'context' : route.page; return <View style={s.sidebar}><View style={s.workspace}><View><Text style={s.workspaceName}>cedar</Text><Text style={s.workspaceMeta}>Acme</Text></View></View>{nav.map(([icon, label, page]) => <Pressable key={page} onPress={() => go({ page })} style={[s.nav, active === page && s.navOn]}><View style={s.navIcon}><Glyph name={icon} color={active === page ? C.mint : C.sandstone} size={20} /></View><Text style={[s.navText, active === page && s.navTextOn]}>{label}</Text></Pressable>)}<View style={s.navBottom}><Pressable onPress={() => go({ page: 'settings' })} style={[s.nav, route.page === 'settings' && s.navOn]}><View style={s.navIcon}><Glyph name="settings" color={route.page === 'settings' ? C.mint : C.sandstone} size={16} /></View><Text style={[s.navText, route.page === 'settings' && s.navTextOn]}>Settings</Text></Pressable><Pressable onPress={notes} style={s.nav}><View style={s.navIcon}><Glyph name="bell" color={C.sandstone} size={16} /></View><Text style={s.navText}>Notifications</Text>{unread > 0 && <View style={s.count}><Text style={s.countText}>{unread}</Text></View>}</Pressable><Pressable onPress={signOut} style={s.nav}><View style={s.navIcon}><Glyph name="close" color={C.sandstone} size={16} /></View><Text style={s.navText}>Sign out</Text></Pressable><View style={s.user}><View style={s.avatar}><Text style={s.avatarText}>JA</Text></View><View><Text style={s.userName}>Jordan Avery</Text><Text style={s.workspaceMeta}>Communications Lead</Text></View></View></View></View>; }
+function Sidebar({ route, unread, go, notes, signOut }: { route: Route; unread: number; go: (route: Route) => void; notes: () => void; signOut: () => void }) { const active = route.page === 'detail' ? 'intelligence' : route.page === 'monitor' || route.page === 'monitor-edit' ? 'monitors' : route.page === 'competitor' ? 'competitors' : route.page === 'topic' ? 'context' : route.page; return <View style={s.sidebar}><View style={s.workspace}><View><Text style={s.workspaceName}>cedar</Text><Text style={s.workspaceMeta}>Acme</Text></View></View>{nav.map(([icon, label, page]) => <Pressable key={page} onPress={() => go({ page })} style={[s.nav, active === page && s.navOn]}><View style={s.navIcon}><Glyph name={icon} color={active === page ? C.mint : C.sandstone} size={20} /></View><Text style={[s.navText, active === page && s.navTextOn]}>{label}</Text></Pressable>)}<View style={s.navBottom}><Pressable onPress={() => go({ page: 'settings' })} style={[s.nav, route.page === 'settings' && s.navOn]}><View style={s.navIcon}><Glyph name="settings" color={route.page === 'settings' ? C.mint : C.sandstone} size={16} /></View><Text style={[s.navText, route.page === 'settings' && s.navTextOn]}>Settings</Text></Pressable><Pressable onPress={notes} style={s.nav}><View style={s.navIcon}><Glyph name="bell" color={C.sandstone} size={16} /></View><Text style={s.navText}>Notifications</Text>{unread > 0 && <View style={s.count}><Text style={s.countText}>{unread}</Text></View>}</Pressable><Pressable onPress={signOut} style={s.nav}><View style={s.navIcon}><Glyph name="close" color={C.sandstone} size={16} /></View><Text style={s.navText}>Sign out</Text></Pressable><View style={s.user}><View style={s.avatar}><Text style={s.avatarText}>JA</Text></View><View><Text style={s.userName}>Jordan Avery</Text><Text style={s.workspaceMeta}>Communications Lead</Text></View></View></View></View>; }
 function Header({ title, subtitle, back, press, right }: { title: string; subtitle?: string; back?: string; press?: () => void; right?: React.ReactNode }) { return <View style={s.header}>{back && <Pressable onPress={press}><Text style={s.back}>← {back}</Text></Pressable>}<View style={s.headerRow}><View style={s.headerCopy}><T h>{title}</T>{subtitle && <Text style={s.subtitle}>{subtitle}</Text>}</View>{right}</View></View>; }
 
-function Home({ items, open, attach, briefing: openBriefing }: { items: Intelligence[]; open: (id: string) => void; attach: (id: string) => void; briefing: () => void }) { const compact = useWindowDimensions().width < 700; const topThreat = items.find((item) => item.kind === 'threat'); const topOpportunity = items.find((item) => item.kind === 'opportunity'); return <Page><Header title="Intelligence" subtitle="The signals that need your attention, with a clear read on what to do next." right={<Button text="Open today’s briefing →" press={openBriefing} />} /><MirroredForestField><IntelligenceSurface forest={false} style={s.topRead} contentStyle={[s.topReadContent, compact && s.topReadContentCompact]}><View style={[s.topReadCell, compact && s.topReadCellCompact]}><Text style={s.intelligenceEyebrow}>TOP THREAT</Text><Pressable onPress={() => topThreat && open(topThreat.id)}><Text style={s.topReadTitle}>{topThreat?.headline}</Text></Pressable><Text style={s.intelligenceSmallCopy}>{topThreat?.summary}</Text></View><View style={[s.topReadDivider, compact && s.topReadDividerCompact]} /><View style={[s.topReadCell, compact && s.topReadCellCompact]}><Text style={s.intelligenceEyebrow}>TOP OPPORTUNITY</Text><Pressable onPress={() => topOpportunity && open(topOpportunity.id)}><Text style={s.topReadTitle}>{topOpportunity?.headline}</Text></Pressable><Text style={s.intelligenceSmallCopy}>{topOpportunity?.summary}</Text></View></IntelligenceSurface><View style={[s.homeHead, s.intelligenceHomeHead]}><View style={s.headlines}><Text style={s.intelligenceMeta}>WEDNESDAY, OCTOBER 21</Text><Text style={s.intelligenceSectionLead}>Latest intelligence</Text></View></View><View style={s.grid}><View style={s.intelligenceGridContent}>{items.map((item, index) => <Story key={item.id} item={item} lead={index === 0} open={open} attach={attach} />)}</View></View></MirroredForestField></Page>; }
+function Home({ items, error, demo, open, attach, briefing: openBriefing }: { items: Intelligence[]; error: string; demo: boolean; open: (id: string) => void; attach: (id: string) => void; briefing: () => void }) { const compact = useWindowDimensions().width < 700; const topThreat = items.find((item) => item.kind === 'threat'); const topOpportunity = items.find((item) => item.kind === 'opportunity'); return <Page><Header title="Intelligence" subtitle={demo ? 'Demo data - configure the backend API to show live monitor findings.' : 'Live findings produced by your monitors.'} right={<Button text="Open today’s briefing →" press={openBriefing} />} />{Boolean(error) && <View style={monitorStyles.error}><Text style={s.smallCopy}>{error}</Text></View>}{items.length ? <MirroredForestField><IntelligenceSurface forest={false} style={s.topRead} contentStyle={[s.topReadContent, compact && s.topReadContentCompact]}><View style={[s.topReadCell, compact && s.topReadCellCompact]}><Text style={s.intelligenceEyebrow}>TOP THREAT</Text><Pressable onPress={() => topThreat && open(topThreat.id)}><Text style={s.topReadTitle}>{topThreat?.headline ?? 'No threat findings'}</Text></Pressable><Text style={s.intelligenceSmallCopy}>{topThreat?.summary}</Text></View><View style={[s.topReadDivider, compact && s.topReadDividerCompact]} /><View style={[s.topReadCell, compact && s.topReadCellCompact]}><Text style={s.intelligenceEyebrow}>TOP OPPORTUNITY</Text><Pressable onPress={() => topOpportunity && open(topOpportunity.id)}><Text style={s.topReadTitle}>{topOpportunity?.headline ?? 'No opportunity findings'}</Text></Pressable><Text style={s.intelligenceSmallCopy}>{topOpportunity?.summary}</Text></View></IntelligenceSurface><View style={[s.homeHead, s.intelligenceHomeHead]}><View style={s.headlines}><Text style={s.intelligenceMeta}>{new Date().toLocaleDateString(undefined, { dateStyle: 'full' }).toUpperCase()}</Text><Text style={s.intelligenceSectionLead}>Latest intelligence</Text></View></View><View style={s.grid}><View style={s.intelligenceGridContent}>{items.map((item, index) => <Story key={item.id} item={item} lead={index === 0} open={open} attach={attach} />)}</View></View></MirroredForestField> : <Card style={monitorStyles.empty}><T>No findings yet</T><Text style={s.smallCopy}>Create and run a monitor. Matching search results will appear here.</Text></Card>}</Page>; }
 function Story({ item, lead, open, attach }: { item: Intelligence; lead: boolean; open: (id: string) => void; attach: (id: string) => void }) { const compact = useWindowDimensions().width < 700; return <IntelligenceSurface style={[s.story, lead && s.lead, compact && s.mobileStory]}><Pressable onPress={() => open(item.id)} style={s.storyInner}><Badge kind={item.kind} /><Text style={[s.intelligenceStoryTitle, lead && s.leadTitle]}>{item.headline}</Text><Text numberOfLines={lead ? 4 : 3} style={s.intelligenceCopy}>{item.summary}</Text>{lead && item.recommendation && <View style={s.recommend}><Glyph name="cedar" color={C.mint} size={14} /><Text style={s.intelligenceRecommendText}>Cedar recommends: {item.recommendation}</Text></View>}<View style={s.storyFoot}><Text style={s.intelligenceMeta}>Updated {item.updatedAt}</Text><GlyphButton name="cedar" color={C.oldGrowth} hint="Ask Cedar" press={() => attach(item.id)} /></View></Pressable></IntelligenceSurface>; }
+
+const formatRun = (monitor: Monitor) => monitor.lastExecution ? `${monitor.lastExecution.status} · ${new Date(monitor.lastExecution.createdAt).toLocaleString()}` : 'Never run';
+
+function ApiRequired() { return <Page><Header title="Monitors" subtitle="Search the web and turn matching evidence into intelligence." /><Card style={monitorStyles.empty}><T>Connect the Cedar API</T><Text style={s.smallCopy}>Set EXPO_PUBLIC_API_URL and sign in, or configure the local development token, to manage monitors.</Text></Card></Page>; }
+
+function Monitors({ api, open, create }: { api: CedarApi | null; open: (id: string) => void; create: () => void }) {
+  const [monitors, setMonitors] = useState<Monitor[]>([]); const [error, setError] = useState(''); const [busy, setBusy] = useState(''); const [deleting, setDeleting] = useState<Monitor | null>(null);
+  const load = useCallback(async () => { if (!api) return; try { const result = await api.listMonitors(); setError(''); setMonitors(result.data); } catch (value) { setError(value instanceof Error ? value.message : 'Could not load monitors'); } }, [api]);
+  useEffect(() => { if (!api) return; void api.listMonitors().then(result => { setError(''); setMonitors(result.data); }).catch(value => setError(value instanceof Error ? value.message : 'Could not load monitors')); }, [api]);
+  if (!api) return <ApiRequired />;
+  const run = async (monitor: Monitor) => { try { setBusy(monitor.id); await api.startExecution(monitor.id); await load(); } catch (value) { setError(value instanceof Error ? value.message : 'Could not run monitor'); } finally { setBusy(''); } };
+  const toggle = async (monitor: Monitor) => { try { setBusy(monitor.id); await api.updateMonitor(monitor.id, monitor.version, { enabled: !monitor.enabled }); await load(); } catch (value) { setError(value instanceof Error ? value.message : 'Could not update monitor'); } finally { setBusy(''); } };
+  const remove = async () => { if (!deleting) return; try { setBusy(deleting.id); await api.deleteMonitor(deleting.id); setDeleting(null); await load(); } catch (value) { setError(value instanceof Error ? value.message : 'Could not delete monitor'); } finally { setBusy(''); } };
+  return <><Page><Header title="Monitors" subtitle="Search queries discover evidence; your trigger decides what becomes intelligence." right={<Button primary text="Create monitor" press={create} />} />{Boolean(error) && <View style={monitorStyles.error}><Text style={s.smallCopy}>{error}</Text></View>}<View style={monitorStyles.monitorList}>{monitors.map((monitor) => { const queryCount = monitor.queries?.length ?? 0; return <Card key={monitor.id} style={monitorStyles.monitorCard}><Pressable onPress={() => open(monitor.id)} style={monitorStyles.monitorMain}><View style={monitorStyles.monitorTitle}><Badge kind={monitor.bucket ?? 'flag'} /><Text style={s.cardTitle}>{monitor.name}</Text></View><Text numberOfLines={2} style={s.smallCopy}>{monitor.trigger}</Text><Meta>{queryCount} {queryCount === 1 ? 'query' : 'queries'} · {monitor.findingsCount ?? 0} findings · {formatRun(monitor)}</Meta></Pressable><View style={monitorStyles.monitorActions}><View style={[monitorStyles.statusPill, monitor.enabled && monitorStyles.statusOn]}><Text style={[monitorStyles.statusText, monitor.enabled && monitorStyles.statusTextOn]}>{monitor.enabled ? 'Enabled' : 'Paused'}</Text></View><Button text={busy === monitor.id ? 'Working…' : 'Run now'} press={() => void run(monitor)} /><Button text={monitor.enabled ? 'Pause' : 'Enable'} press={() => void toggle(monitor)} /><Button danger text="Delete" press={() => setDeleting(monitor)} /></View></Card>; })}{!monitors.length && <Card style={monitorStyles.empty}><T>No monitors yet</T><Text style={s.smallCopy}>Create one with up to five search queries and a plain-language trigger.</Text></Card>}</View></Page>{deleting && <Popup close={() => setDeleting(null)}><Card style={monitorStyles.confirm}><T>Delete “{deleting.name}”?</T><Text style={s.smallCopy}>Scheduled runs will stop. Historical findings will remain available.</Text><View style={monitorStyles.actionRow}><Button text="Cancel" press={() => setDeleting(null)} /><Button danger text={busy ? 'Deleting…' : 'Delete monitor'} press={() => void remove()} /></View></Card></Popup>}</>;
+}
+
+function MonitorDetail({ api, id, back, edit, refreshFindings }: { api: CedarApi | null; id?: string; back: () => void; edit: () => void; refreshFindings: () => Promise<void> }) {
+  const [monitor, setMonitor] = useState<Monitor | null>(null); const [findings, setFindings] = useState<Finding[]>([]); const [error, setError] = useState(''); const [running, setRunning] = useState(false);
+  const load = useCallback(async () => { if (!api || !id) return; try { const [monitorResult, findingResult] = await Promise.all([api.getMonitor(id), api.listFindings(id)]); setError(''); setMonitor(monitorResult.data); setFindings(findingResult.data); } catch (value) { setError(value instanceof Error ? value.message : 'Could not load monitor'); } }, [api, id]);
+  useEffect(() => { if (!api || !id) return; void Promise.all([api.getMonitor(id), api.listFindings(id)]).then(([monitorResult, findingResult]) => { setError(''); setMonitor(monitorResult.data); setFindings(findingResult.data); }).catch(value => setError(value instanceof Error ? value.message : 'Could not load monitor')); }, [api, id]);
+  if (!api) return <ApiRequired />;
+  if (!id) return <Page><Header title="Monitor not found" back="Monitors" press={back} /></Page>;
+  const run = async () => { try { setRunning(true); setError(''); await api.startExecution(id); await load(); await refreshFindings(); } catch (value) { setError(value instanceof Error ? value.message : 'Could not run monitor'); } finally { setRunning(false); } };
+  const monitorQueries = monitor?.queries ?? [];
+  return <Page><Header title={monitor?.name ?? 'Monitor'} subtitle={monitor ? `${monitor.enabled ? 'Enabled' : 'Paused'} · ${monitorQueries.length} configured queries` : 'Loading…'} back="Monitors" press={back} right={<View style={monitorStyles.actionRow}><Button text="Edit" press={edit} /><Button primary text={running ? 'Starting…' : 'Run now'} press={() => void run()} /></View>} />{Boolean(error) && <View style={monitorStyles.error}><Text style={s.smallCopy}>{error}</Text></View>}{monitor && <><View style={monitorStyles.detailGrid}><Card style={monitorStyles.detailCard}><Text style={s.eyebrow}>TRIGGER</Text><Text style={s.copy}>{monitor.trigger}</Text></Card><Card style={monitorStyles.detailCard}><Text style={s.eyebrow}>BUCKET</Text><Badge kind={monitor.bucket ?? 'flag'} /><Meta>Matches always use this bucket.</Meta></Card></View><Section title="Search queries"><Card>{monitorQueries.map((query, index) => <View key={query} style={[s.list, index < monitorQueries.length - 1 && s.border]}><Text style={s.number}>{index + 1}</Text><Text style={s.copy}>{query}</Text></View>)}</Card></Section><Section title="Last run"><Card style={monitorStyles.detailCard}>{monitor.executions?.[0] ? <><Text style={s.rowTitle}>{monitor.executions[0].status.toUpperCase()}</Text><Meta>{new Date(monitor.executions[0].createdAt).toLocaleString()} · {monitor.executions[0].resultCount ?? 0} results · {monitor.executions[0].findingsCreated ?? 0} new findings</Meta>{Boolean(monitor.executions[0].error) && <Text style={monitorStyles.errorText}>{monitor.executions[0].error}</Text>}</> : <Text style={s.smallCopy}>This monitor has not run yet.</Text>}</Card></Section><Section title="Recent findings"><Card>{findings.slice(0, 10).map((finding, index) => <Pressable accessibilityRole="link" key={finding.id} onPress={() => void Linking.openURL(finding.sourceUrl)} style={[monitorStyles.findingRow, index < findings.slice(0, 10).length - 1 && s.border]}><Badge kind={finding.bucket} /><View style={s.flex}><Text style={s.rowTitle}>{finding.title}</Text><Text style={s.smallCopy}>{finding.explanation}</Text><Meta>{new Date(finding.createdAt).toLocaleString()} · Open source ↗</Meta></View></Pressable>)}{!findings.length && <View style={monitorStyles.empty}><Text style={s.smallCopy}>No findings from this monitor yet.</Text></View>}</Card></Section></>}</Page>;
+}
+
+function MonitorEditor({ api, id, back, saved }: { api: CedarApi | null; id?: string; back: () => void; saved: (id: string) => void }) {
+  const [existing, setExisting] = useState<Monitor | null>(null); const [name, setName] = useState(''); const [queries, setQueries] = useState(['']);
+  const [trigger, setTrigger] = useState(''); const [bucket, setBucket] = useState<Bucket>('flag'); const [enabled, setEnabled] = useState(true); const [error, setError] = useState(''); const [saving, setSaving] = useState(false);
+  useEffect(() => { if (!api || !id) return; void api.getMonitor(id).then(({ data }) => { setExisting(data); setName(data.name); setQueries(data.queries?.length ? data.queries : ['']); setTrigger(data.trigger ?? ''); setBucket(data.bucket ?? 'flag'); setEnabled(data.enabled); }).catch(value => setError(value instanceof Error ? value.message : 'Could not load monitor')); }, [api, id]);
+  if (!api) return <ApiRequired />;
+  const updateQuery = (index: number, value: string) => setQueries(current => current.map((query, queryIndex) => queryIndex === index ? value : query));
+  const submit = async () => {
+    const input: MonitorInput = { name: name.trim(), queries: queries.map(query => query.trim()).filter(Boolean), trigger: trigger.trim(), bucket, enabled };
+    if (!input.name || !input.trigger || !input.queries.length) { setError('Name, at least one query, and a trigger are required.'); return; }
+    try { setSaving(true); setError(''); const result = existing ? await api.updateMonitor(existing.id, existing.version, input) : await api.createMonitor(input); saved(result.data.id); }
+    catch (value) { setError(value instanceof Error ? value.message : 'Could not save monitor'); } finally { setSaving(false); }
+  };
+  return <Page><Header title={id ? 'Edit monitor' : 'Create monitor'} subtitle="Keep it simple: where to search, what should match, and where the finding belongs." back={id ? 'Monitor' : 'Monitors'} press={back} /><Card style={monitorStyles.form}><Text style={monitorStyles.label}>Name</Text><TextInput value={name} onChangeText={setName} placeholder="Competitor launch monitor" placeholderTextColor={C.faint} style={monitorStyles.textInput} /><Text style={monitorStyles.label}>Search queries</Text>{queries.map((query, index) => <View key={index} style={monitorStyles.queryRow}><TextInput value={query} onChangeText={value => updateQuery(index, value)} placeholder="e.g. enterprise AI product launch" placeholderTextColor={C.faint} style={[monitorStyles.textInput, monitorStyles.queryInput]} />{queries.length > 1 && <Button danger text="Remove" press={() => setQueries(current => current.filter((_, queryIndex) => queryIndex !== index))} />}</View>)}{queries.length < 5 && <Button text="Add query" press={() => setQueries(current => [...current, ''])} />}<Text style={monitorStyles.label}>Trigger</Text><TextInput multiline value={trigger} onChangeText={setTrigger} placeholder="Create a finding when a competitor announces a major enterprise product or feature." placeholderTextColor={C.faint} style={[monitorStyles.textInput, monitorStyles.textArea]} /><Text style={monitorStyles.label}>Bucket</Text><View style={monitorStyles.bucketRow}>{(['threat', 'flag', 'opportunity'] as Bucket[]).map(value => <Pressable key={value} onPress={() => setBucket(value)} style={[monitorStyles.bucketChoice, bucket === value && monitorStyles.bucketChoiceOn]}><Badge kind={value} /></Pressable>)}</View><Pressable onPress={() => setEnabled(value => !value)} style={monitorStyles.enabledRow}><View style={[s.toggle, enabled && s.toggleOn]}><View style={[s.knob, enabled && s.knobOn]} /></View><View><Text style={s.rowTitle}>{enabled ? 'Enabled' : 'Paused'}</Text><Text style={s.smallCopy}>Enabled monitors run approximately every six hours.</Text></View></Pressable>{Boolean(error) && <View style={monitorStyles.error}><Text style={s.smallCopy}>{error}</Text></View>}<View style={monitorStyles.actionRow}><Button text="Cancel" press={back} /><Button primary text={saving ? 'Saving…' : 'Save monitor'} press={() => void submit()} /></View></Card></Page>;
+}
 
 
 function Tabs({ labels, selected, set }: { labels: string[]; selected: string; set: (value: string) => void }) { const companyContext = labels.includes('Strategy'); return <View style={s.tabWrap}><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[s.tabs, interaction.tabs]}><View style={interaction.tabRow}>{labels.map((label) => <Pressable key={label} accessibilityRole="tab" accessibilityState={{ selected: selected === label }} onPress={() => set(label)} style={[s.tab, interaction.tab, selected === label && s.tabOn]}><Text style={[s.tabText, interaction.tabText, selected === label && interaction.tabTextOn]}>{label}</Text></Pressable>)}</View></ScrollView>{companyContext && <View style={s.contextThemes}><Text style={s.contextThemesLabel}>TRACKED THEMES</Text>{topics.slice(0, 4).map((topic) => <View key={topic.id} style={s.contextTheme}><Text style={s.contextThemeName}>{topic.name}</Text><Text style={s.contextThemeMeta}>{topic.state} · {topic.count} {topic.unit}</Text></View>)}</View>}</View>; }
@@ -208,7 +204,7 @@ function Detail({ item, items, attached, back, attach, incident, open, draft, co
       <List title="What happened" values={item.whatHappened} />
       <List title="Why this matters" values={item.whyItMatters} />
       {item.recommendation && <Recommendation text={item.recommendation} action={{ text: 'Review actions', press: () => setTab('Recommended Actions') }} secondaryAction={item.incident ? { text: 'Open incident', press: incident } : undefined} />}
-      <Section title="Evidence"><View style={s.chips}>{item.signals.map((signal) => <View key={signal} style={s.chip}><Text style={s.chipText}>{signal}</Text></View>)}</View></Section>
+      <Section title="Evidence"><View style={s.chips}>{item.signals.map((signal) => signal.startsWith('http') ? <Pressable accessibilityRole="link" key={signal} onPress={() => void Linking.openURL(signal)} style={s.chip}><Text style={s.chipText}>Open original source ↗</Text></Pressable> : <View key={signal} style={s.chip}><Text style={s.chipText}>{signal}</Text></View>)}</View></Section>
     </View>}
     {tab === 'Updates' && <Activity />}
     {tab === 'Recommended Actions' && <Section title="Recommended actions" subtitle="Changes are recorded in the local audit trail."><Card>{item.actions.map((action, index) => <View key={action.id} style={[s.action, index < item.actions.length - 1 && s.border]}><View style={s.flex}><Text style={s.rowTitle}>{action.title}</Text><Text style={s.smallCopy}>{action.description}</Text><Meta>{action.status}</Meta></View><View style={s.actionButtons}><Button text={action.output} press={() => draft(`Draft — ${action.title}`, item.headline, `Draft for ${action.title}\n\n${item.summary}\n\nRecommended posture\n${item.recommendation ?? 'Continue monitoring.'}`, item.signals)} /><Pressable onPress={() => complete(item.id, action.id)}><Text style={s.link}>{action.status === 'Complete' ? 'Reopen' : 'Complete'}</Text></Pressable></View></View>)}</Card></Section>}
@@ -280,42 +276,22 @@ const s: any = {
   ...base,
   app: { ...base.app, backgroundColor: C.quartz },
   main: { ...base.main, position: 'relative', backgroundColor: C.quartz, backgroundImage: 'linear-gradient(30deg, #E8DDCB 12%, transparent 12.5%, transparent 87%, #E8DDCB 87.5%, #E8DDCB), linear-gradient(150deg, #E8DDCB 12%, transparent 12.5%, transparent 87%, #E8DDCB 87.5%, #E8DDCB), linear-gradient(30deg, #E8DDCB 12%, transparent 12.5%, transparent 87%, #E8DDCB 87.5%, #E8DDCB), linear-gradient(150deg, #E8DDCB 12%, transparent 12.5%, transparent 87%, #E8DDCB 87.5%, #E8DDCB), linear-gradient(60deg, #E8DDCB 25%, transparent 25.5%, transparent 75%, #E8DDCB 75%, #E8DDCB), linear-gradient(60deg, #E8DDCB 25%, transparent 25.5%, transparent 75%, #E8DDCB 75%, #E8DDCB)' as never, backgroundSize: '96px 166px' as never, backgroundPosition: '0 0, 0 0, 48px 83px, 48px 83px, 0 0, 48px 83px' as never },
-  // The frame is transparent apart from its material, so the main argyle field
-  // continues beneath it while lava remains a local animated layer.
+  // The primary frame is a living backdrop: warm lava shapes sit behind a single
+  // translucent surface so every tab gets the same calm, refractive workspace.
   workspaceFrame: { width: '100%', position: 'relative', borderRadius: 26, borderWidth: 1, borderColor: 'rgba(255,255,255,.70)', overflow: 'hidden', boxShadow: '0 6px 8px rgba(30,62,43,.08), inset 0 1px 0 rgba(255,255,255,.82)' as never },
   workspaceContent: { position: 'relative', zIndex: 2, gap: 24, padding: 26 },
-  lavaBackdrop: { ...StyleSheet.absoluteFill, overflow: 'hidden' },
+  lavaBackdrop: { ...StyleSheet.absoluteFill, overflow: 'hidden', backgroundColor: '#EDE2D4' },
+  lavaAtmosphere: { ...StyleSheet.absoluteFill, backgroundImage: 'radial-gradient(circle at 18% 22%, #FAFBF8 0%, #F1F3EC 48%, #E2E8DB 100%)' as never },
   lavaCluster: { position: 'absolute', left: '-14%', top: '-30%', width: '128%', height: '160%', filter: 'blur(15px)' as never },
-  lavaBlob: { position: 'absolute', opacity: .68, borderWidth: 1, borderColor: 'rgba(255,255,255,.22)' },
+  lavaBlob: { position: 'absolute', opacity: .84, borderWidth: 1, borderColor: 'rgba(255,255,255,.22)' },
   lavaCedar: { width: '62%', height: '50%', left: '1%', top: '4%', borderRadius: 260, backgroundColor: '#52763A', backgroundImage: 'linear-gradient(145deg, #365C20 0%, #6B904B 72%, #A8C984 100%)' as never },
   lavaFern: { width: '70%', height: '55%', right: '-12%', top: '25%', borderRadius: 300, backgroundColor: '#8CAD6B', backgroundImage: 'linear-gradient(155deg, #567C3C 0%, #92B871 58%, #CEE7AE 100%)' as never },
   lavaMint: { width: '56%', height: '46%', left: '18%', bottom: '-8%', borderRadius: 260, backgroundColor: '#B7D99A', backgroundImage: 'linear-gradient(130deg, #7FA064 0%, #C0E2A1 62%, #E5F0C5 100%)' as never },
   lavaLeaf: { width: '35%', height: '23%', left: '-3%', top: '48%', borderRadius: 180, backgroundColor: '#7F9D61' },
   lavaPale: { width: '29%', height: '25%', right: '7%', top: '-3%', borderRadius: 160, backgroundColor: '#CEE7B2' },
   lavaMoss: { width: '25%', height: '27%', right: '23%', bottom: '-10%', borderRadius: 170, backgroundColor: '#608344' },
-  lavaVignette: { ...StyleSheet.absoluteFill, backgroundImage: 'radial-gradient(120% 95% at 50% 42%, transparent 45%, rgba(8,32,26,.22) 100%)' as never },
-  // A full-surface radial highlight deliberately fades to transparent. Keeping it
-  // unbounded avoids the visible horizontal terminus a short overlay produces.
-  glassSheen: { ...StyleSheet.absoluteFill, zIndex: 1, backgroundImage: 'radial-gradient(125% 74% at 8% -12%, rgba(255,255,255,.46) 0%, rgba(255,255,255,.16) 34%, rgba(255,255,255,0) 72%)' as never },
-  glassTuner: { position: 'absolute', right: 20, bottom: 20, zIndex: 10, alignItems: 'flex-end', gap: 10 },
-  glassTunerMobile: { left: 12, right: 12, bottom: 12 },
-  glassTunerTrigger: { minHeight: 42, paddingHorizontal: 15, borderRadius: 999, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(8,32,26,.94)', borderWidth: 1, borderColor: 'rgba(233,200,142,.76)', boxShadow: '0 10px 26px rgba(8,32,26,.20)' as never },
-  glassTunerTriggerPressed: { opacity: .84 },
-  glassTunerTriggerText: { color: C.quartz, fontSize: 12.5, fontWeight: '700' },
-  glassPanel: { width: 318, maxWidth: '100%', padding: 16, gap: 12, borderRadius: 18, backgroundColor: 'rgba(255,252,248,.96)', borderWidth: 1, borderColor: 'rgba(199,123,69,.28)', boxShadow: '0 14px 36px rgba(42,34,28,.14)' as never },
-  glassPanelHead: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 14 },
-  glassPanelTitle: { color: C.bark, fontSize: 15, fontWeight: '800' },
-  glassPanelMeta: { marginTop: 2, color: C.faint, fontSize: 10.5, fontWeight: '600' },
-  glassPanelCopy: { color: C.text, fontSize: 11.5, lineHeight: 16 },
-  glassReset: { minHeight: 28, paddingHorizontal: 6, color: C.rust, fontSize: 11.5, fontWeight: '800', textAlignVertical: 'center' },
-  glassControls: { gap: 7 },
-  glassControl: { minHeight: 78, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 5, gap: 3, borderRadius: 10, backgroundColor: '#F6EFE6' },
-  glassControlHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
-  glassControlCopy: { flex: 1, minWidth: 0 },
-  glassControlLabel: { color: C.bark, fontSize: 11.5, fontWeight: '800' },
-  glassControlHint: { marginTop: 1, color: C.faint, fontSize: 9.5 },
-  glassInput: { width: 76, height: 32, paddingHorizontal: 8, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(199,123,69,.38)', backgroundColor: '#FFFDF9', color: C.bark, fontSize: 12, fontWeight: '700', textAlign: 'right' },
-  glassSlider: { width: '100%', height: 28 },
+  lavaVignette: { ...StyleSheet.absoluteFill, backgroundImage: 'linear-gradient(110deg, rgba(255,255,255,.14), rgba(255,255,255,.42) 52%, rgba(255,251,244,.18))' as never },
+  glassSheen: { position: 'absolute', zIndex: 1, left: 0, right: 0, top: 0, height: '42%', backgroundImage: 'linear-gradient(180deg, rgba(255,255,255,.34), rgba(255,255,255,.06))' as never, borderBottomWidth: 1, borderColor: 'rgba(255,255,255,.30)' },
   card: { ...base.card, backgroundColor: 'rgba(255,253,249,.72)', backgroundImage: 'linear-gradient(135deg, rgba(199,123,69,.045) 20%, rgba(233,200,142,.13) 50%, rgba(199,123,69,.045) 80%)' as never, borderColor: 'rgba(199,123,69,.24)', borderRadius: 14, boxShadow: '0 2px 8px rgba(42,34,28,.035)' as never },
   historyCard: { paddingHorizontal: 20, paddingVertical: 18 },
   workspace: { ...base.workspace, paddingTop: 30, paddingBottom: 34, flexDirection: 'column', alignItems: 'flex-start', gap: 54 },
@@ -406,6 +382,27 @@ const s: any = {
   composer: { ...base.composer, backgroundColor: '#FCF1E5', borderColor: '#ECD7C0' },
   composerInput: { ...base.composerInput, backgroundColor: '#FFFDFC', borderColor: '#E7C9AA', borderRadius: 12 },
 };
+
+const monitorStyles = StyleSheet.create({
+  monitorList: { gap: 12 },
+  monitorCard: { padding: 18, gap: 16, flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
+  monitorMain: { flex: 1, minWidth: 280, gap: 9 },
+  monitorTitle: { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
+  monitorActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' },
+  statusPill: { paddingHorizontal: 9, paddingVertical: 5, borderRadius: 999, backgroundColor: C.muted },
+  statusOn: { backgroundColor: C.opBg }, statusText: { color: C.faint, fontSize: 11, fontWeight: '700' }, statusTextOn: { color: C.op },
+  error: { padding: 12, borderWidth: 1, borderColor: C.rust, borderRadius: 9, backgroundColor: C.threatBg },
+  errorText: { color: C.rust, fontSize: 12.5, lineHeight: 18 },
+  empty: { padding: 28, gap: 8, alignItems: 'flex-start' }, actionRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', alignItems: 'center' },
+  detailGrid: { flexDirection: 'row', gap: 16, flexWrap: 'wrap' }, detailCard: { flex: 1, minWidth: 260, padding: 18, gap: 10 },
+  findingRow: { padding: 16, flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  form: { padding: 22, gap: 12 }, label: { color: C.bark, fontSize: 12.5, fontWeight: '700', marginTop: 6 },
+  textInput: { width: '100%', minHeight: 44, paddingHorizontal: 13, paddingVertical: 10, borderRadius: 9, borderWidth: 1, borderColor: C.border, backgroundColor: C.surface, color: C.ink, fontSize: 13.5 },
+  textArea: { minHeight: 120, textAlignVertical: 'top' }, queryRow: { flexDirection: 'row', alignItems: 'center', gap: 8 }, queryInput: { flex: 1 },
+  bucketRow: { flexDirection: 'row', gap: 9, flexWrap: 'wrap' }, bucketChoice: { padding: 5, borderWidth: 2, borderColor: 'transparent', borderRadius: 8 }, bucketChoiceOn: { borderColor: C.copper },
+  enabledRow: { flexDirection: 'row', gap: 12, alignItems: 'center', paddingVertical: 8 },
+  confirm: { width: 420, maxWidth: '100%', padding: 22, gap: 16 },
+});
 
 const layout = StyleSheet.create({
   pageScroller: { flex: 1, width: '100%', minWidth: 0 },
