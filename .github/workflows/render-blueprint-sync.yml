@@ -1,4 +1,4 @@
-name: Sync Render Blueprint
+name: Deploy to Render
 
 on:
   push:
@@ -6,11 +6,11 @@ on:
       - main
 
 concurrency:
-  group: render-blueprint-sync
+  group: render-main-deploy
   cancel-in-progress: false
 
 jobs:
-  sync:
+  deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Render Blueprint sync
@@ -19,3 +19,28 @@ jobs:
         run: |
           test -n "$RENDER_BLUEPRINT_SYNC_HOOK"
           curl --fail --show-error --silent --retry 3 "$RENDER_BLUEPRINT_SYNC_HOOK"
+
+      - name: Deploy frontend and API
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+        run: |
+          test -n "$RENDER_API_KEY"
+          for service_id in srv-dbcl8tbncjis73cr0gn0 srv-dbcmed5g1s2s73dq1oqg; do
+            curl --fail --show-error --silent --retry 3 \
+              --request POST \
+              --url "https://api.render.com/v1/services/${service_id}/deploys" \
+              --header "Authorization: Bearer ${RENDER_API_KEY}" \
+              --header "Content-Type: application/json" \
+              --data "{\"commitId\":\"${GITHUB_SHA}\"}"
+          done
+
+      - name: Deploy workflow
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+        run: |
+          curl --fail --show-error --silent --retry 3 \
+            --request POST \
+            --url "https://api.render.com/v1/workflowversions" \
+            --header "Authorization: Bearer ${RENDER_API_KEY}" \
+            --header "Content-Type: application/json" \
+            --data "{\"workflowId\":\"wfl-dbcmeddg1s2s73dq1p20\",\"commit\":\"${GITHUB_SHA}\"}"
