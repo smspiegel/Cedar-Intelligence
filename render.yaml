@@ -1,98 +1,102 @@
-services:
-  - type: web
-    name: cedar-api
-    runtime: node
-    region: oregon
-    plan: 0.5c-512mb
-    autoDeployTrigger: commit
-    rootDir: backend
-    buildCommand: npm ci --include=dev && npm run build
-    preDeployCommand: npm run migrate
-    startCommand: npm start
-    healthCheckPath: /health
-    envVars:
-      - key: NODE_VERSION
-        value: 22
-      - key: NODE_ENV
-        value: production
-      - key: AUTH_MODE
-        value: jwt
-      - key: AUTH_ISSUER
-        sync: false
-      - key: AUTH_AUDIENCE
-        sync: false
-      - key: AUTH_JWKS_URL
-        sync: false
-      - key: AUTH_TENANT_CLAIM
-        value: org_id
-      - key: CORS_ORIGINS
-        sync: false
-      - key: SURREAL_URL
-        sync: false
-      - key: SURREAL_NAMESPACE
-        value: cedar
-      - key: SURREAL_DATABASE
-        value: cedar
-      - key: SURREAL_USERNAME
-        sync: false
-      - key: SURREAL_PASSWORD
-        sync: false
-      - key: RENDER_API_KEY
-        sync: false
-      - key: RENDER_WORKFLOW_SLUG
-        value: cedar-workflow
+projects:
+  - name: Cedar
+    environments:
+      - name: Production
+        services:
+          - type: web
+            name: cedar-api
+            runtime: node
+            region: oregon
+            plan: 0.5c-512mb
+            autoDeployTrigger: commit
+            rootDir: backend
+            buildCommand: npm ci --include=dev && npm run build
+            preDeployCommand: npm run migrate
+            startCommand: npm start
+            healthCheckPath: /health
+            envVars:
+              - key: NODE_VERSION
+                value: 22
+              - key: NODE_ENV
+                value: production
+              - key: AUTH_MODE
+                value: jwt
+              - key: AUTH_ISSUER
+                sync: false
+              - key: AUTH_AUDIENCE
+                sync: false
+              - key: AUTH_JWKS_URL
+                sync: false
+              - key: AUTH_TENANT_CLAIM
+                value: org_id
+              - key: CORS_ORIGINS
+                sync: false
+              - key: SURREAL_URL
+                sync: false
+              - key: SURREAL_NAMESPACE
+                value: cedar
+              - key: SURREAL_DATABASE
+                value: cedar
+              - key: SURREAL_USERNAME
+                sync: false
+              - key: SURREAL_PASSWORD
+                sync: false
+              - key: RENDER_API_KEY
+                sync: false
+              - key: RENDER_WORKFLOW_SLUG
+                value: cedar-workflow
 
-  - type: workflow
-    name: cedar-workflow
-    runtime: node
-    region: oregon
-    autoDeployTrigger: commit
-    rootDir: backend
-    buildCommand: npm ci --include=dev && npm run build
-    startCommand: npm run workflow
-    envVars:
-      - key: NODE_VERSION
-        value: 22
-      - key: NODE_ENV
-        value: production
-      - key: SURREAL_URL
-        sync: false
-      - key: SURREAL_NAMESPACE
-        value: cedar
-      - key: SURREAL_DATABASE
-        value: cedar
-      - key: SURREAL_USERNAME
-        sync: false
-      - key: SURREAL_PASSWORD
-        sync: false
-      - key: EVALUATOR_URL
-        sync: false
-      - key: EVALUATOR_API_KEY
-        sync: false
-      - key: EVALUATOR_MODEL
-        value: gpt-5-mini
-      - key: AGENT_MEMORY_ENDPOINT
-        sync: false
-      - key: AGENT_MEMORY_CONTEXT
-        sync: false
-      - key: AGENT_MEMORY_API_KEY
-        sync: false
+          - type: workflow
+            name: cedar-workflow
+            runtime: node
+            region: oregon
+            autoDeployTrigger: commit
+            rootDir: backend
+            buildCommand: npm ci --include=dev && npm run build
+            startCommand: npm run workflow
+            envVars:
+              - key: NODE_VERSION
+                value: 22
+              - key: NODE_ENV
+                value: production
+              - key: SURREAL_URL
+                sync: false
+              - key: SURREAL_NAMESPACE
+                value: cedar
+              - key: SURREAL_DATABASE
+                value: cedar
+              - key: SURREAL_USERNAME
+                sync: false
+              - key: SURREAL_PASSWORD
+                sync: false
+              - key: EVALUATOR_URL
+                sync: false
+              - key: EVALUATOR_API_KEY
+                sync: false
+              - key: EVALUATOR_MODEL
+                value: gpt-5-mini
+              - key: AGENT_MEMORY_ENDPOINT
+                sync: false
+              - key: AGENT_MEMORY_CONTEXT
+                sync: false
+              - key: AGENT_MEMORY_API_KEY
+                sync: false
 
-  - type: web
-    name: Cedar-Intelligence
-    runtime: static
-    autoDeployTrigger: commit
-    rootDir: frontend
-    buildCommand: npm ci && npm run build
-    staticPublishPath: dist
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
-    envVars:
-      - key: NODE_VERSION
-        value: 24
-      - key: EXPO_PUBLIC_API_URL
-        sync: false
-      - key: EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY
-        sync: false
+          - type: web
+            name: Cedar-Intelligence
+            runtime: static
+            autoDeployTrigger: commit
+            rootDir: frontend
+            buildCommand: npm ci && npm run build
+            staticPublishPath: dist
+            routes:
+              - type: rewrite
+                source: /*
+                destination: /index.html
+            envVars:
+              - key: NODE_VERSION
+                value: 24
+              - key: EXPO_PUBLIC_API_URL
+                sync: false
+              - key: EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY
+                sync: false
