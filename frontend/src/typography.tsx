@@ -46,13 +46,17 @@ const familyFor = (style: TextProps['style'] | TextInputProps['style']) => {
   return familyByWeight[String(weight ?? '400')] ?? 'Manrope_400Regular';
 };
 
+const softenAllCaps = (children: TextProps['children']) => typeof children === 'string' && /^[A-Z][A-Z ]{3,}$/.test(children)
+  ? children.slice(0, 1) + children.slice(1).toLowerCase()
+  : children;
+
 export function useManrope() {
   return useFonts(manropeFonts);
 }
 
 /** Shared text primitive that keeps each requested weight on the matching Manrope face. */
 export function ManropeText({ style, ...props }: TextProps) {
-  return <NativeText {...props} style={[style, { fontFamily: familyFor(style), fontWeight: undefined }]} />;
+  return <NativeText {...props} style={[style, { fontFamily: familyFor(style), fontWeight: undefined }]}>{softenAllCaps(props.children)}</NativeText>;
 }
 
 /** Shared input primitive, including editors and inline fields. */

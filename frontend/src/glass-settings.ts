@@ -16,6 +16,17 @@ export const defaultGlassSettings: GlassSettings = {
   edgeStrength: 0.82,
 };
 
+// Lower-intensity refraction for repeated operational surfaces. The composer
+// keeps the fuller default material, while cards remain readable and stable.
+export const surfaceGlassSettings: GlassSettings = {
+  displacementScale: 22,
+  blurAmount: 0.08,
+  saturation: 118,
+  aberrationIntensity: 0.7,
+  elasticity: 0.04,
+  edgeStrength: 0.62,
+};
+
 export const glassLimits: Record<keyof GlassSettings, readonly [number, number]> = {
   displacementScale: [0, 80],
   blurAmount: [0, 0.3],

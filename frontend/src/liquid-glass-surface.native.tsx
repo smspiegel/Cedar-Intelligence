@@ -3,7 +3,9 @@ import { GlassView, isGlassEffectAPIAvailable } from 'expo-glass-effect';
 import { StyleSheet, View } from 'react-native';
 import type { GlassSettings } from './glass-settings';
 
-export function LiquidGlassSurface({ children, settings, fill = false }: { children: ReactNode; settings: GlassSettings; fill?: boolean }) {
+export function supportsLiquidRefraction() { return false; }
+
+export function LiquidGlassSurface({ children, settings, fill = false }: { children: ReactNode; settings: GlassSettings; fill?: boolean; cornerRadius?: number }) {
   // GlassView is the native material on iOS 26+. Other native targets retain a
   // high-contrast frost so live workspace content never relies on transparency.
   if (isGlassEffectAPIAvailable()) {
