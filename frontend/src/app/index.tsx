@@ -1,9 +1,8 @@
 import { useAuth, useClerk } from '@clerk/expo';
 import Slider from '@react-native-community/slider';
 import { Redirect } from 'expo-router';
-import { createContext, createElement, useContext, useEffect, useState } from 'react';
+import { createContext, createElement, useContext, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
-import Animated, { cancelAnimation, Easing, useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
 import { competitors, initialPriorities, initialSources, intelligence as fixture, opportunities, topics, type Intelligence, type Kind, type Opportunity } from '@/cedar-data';
 import { defaultGlassSettings, glassLimits, glassSteps, type GlassSettings } from '@/glass-settings';
 import { LiquidGlassSurface } from '@/liquid-glass-surface';
@@ -95,24 +94,11 @@ function Button({ text, press, primary = false, danger = false }: { text: string
 function Glyph({ name, color = C.text, size = 18 }: { name: GlyphName; color?: string; size?: number }) { return <View style={[s.glyph, { width: size, height: size }]}>{createElement('svg', { xmlns: 'http://www.w3.org/2000/svg', width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: color, strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true, focusable: false }, glyph[name].map((d, index) => createElement('path', { d, key: index })))}</View>; }
 function GlyphButton({ name, press, color = C.text, hint }: { name: GlyphName; press: () => void; color?: string; hint?: string }) { const [hovered, setHovered] = useState(false); const cedar = name === 'cedar'; return <View style={interaction.glyphControl}><Pressable onPress={press} accessibilityRole="button" accessibilityLabel={hint ?? name} accessibilityHint={hint} onHoverIn={() => setHovered(true)} onHoverOut={() => setHovered(false)} style={[s.icon, cedar && s.cedarOrb, hovered && (cedar ? s.cedarOrbHover : interaction.glyphButtonHover)]}><Glyph name={name} color={cedar ? C.abyss : color} size={cedar ? 15 : 18} /></Pressable>{hint && hovered && <View pointerEvents="none" style={interaction.hoverHint}><Text style={interaction.hoverHintText}>{hint}</Text></View>}</View>; }
 function Badge({ kind }: { kind: Kind }) { const [color, backgroundColor] = kindColor(kind); return <View style={[s.badge, { backgroundColor }]}><Text style={[s.badgeText, { color }]}>{kind.toUpperCase()}</Text></View>; }
-function LavaBackdrop() {
-  const slowDrift = useSharedValue(0); const rise = useSharedValue(0); const pulse = useSharedValue(0);
-  useEffect(() => {
-    const ease = Easing.inOut(Easing.sin);
-    slowDrift.value = withRepeat(withSequence(withTiming(1, { duration: 12600, easing: ease }), withTiming(0, { duration: 12600, easing: ease })), -1, false);
-    rise.value = withRepeat(withSequence(withTiming(1, { duration: 9800, easing: ease }), withTiming(0, { duration: 9800, easing: ease })), -1, true);
-    pulse.value = withRepeat(withSequence(withTiming(1, { duration: 7400, easing: ease }), withTiming(0, { duration: 7400, easing: ease })), -1, true);
-    return () => { cancelAnimation(slowDrift); cancelAnimation(rise); cancelAnimation(pulse); };
-  }, [pulse, rise, slowDrift]);
-  const cedarBlob = useAnimatedStyle(() => ({ transform: [{ translateX: -65 + slowDrift.value * 130 }, { translateY: 28 - rise.value * 82 }, { scale: .96 + pulse.value * .12 }] }));
-  const fernBlob = useAnimatedStyle(() => ({ transform: [{ translateX: 26 - slowDrift.value * 100 }, { translateY: -54 + rise.value * 118 }, { scale: 1 + pulse.value * .14 }] }));
-  const mintBlob = useAnimatedStyle(() => ({ transform: [{ translateX: -20 + rise.value * 80 }, { translateY: 44 - pulse.value * 92 }, { scale: .9 + slowDrift.value * .17 }] }));
-  return <View pointerEvents="none" style={s.lavaBackdrop}><View style={s.lavaAtmosphere} /><View style={s.lavaCluster}><Animated.View style={[s.lavaBlob, s.lavaCedar, cedarBlob]} /><Animated.View style={[s.lavaBlob, s.lavaFern, fernBlob]} /><Animated.View style={[s.lavaBlob, s.lavaMint, mintBlob]} /><View style={[s.lavaBlob, s.lavaLeaf]} /><View style={[s.lavaBlob, s.lavaPale]} /><View style={[s.lavaBlob, s.lavaMoss]} /></View><View style={s.lavaVignette} /></View>;
-}
+function ArgyleBackdrop() { return <View pointerEvents="none" style={s.argyleBackdrop}><View style={s.argyleWash} /><View style={s.argyleVignette} /></View>; }
 function WorkspaceFrame({ children }: { children: React.ReactNode }) {
   const settings = useContext(GlassSettingsContext);
   return <View style={s.workspaceFrame}>
-    <LavaBackdrop />
+    <ArgyleBackdrop />
     <LiquidGlassSurface settings={settings}>
       <View pointerEvents="none" style={s.glassSheen} />
       <View style={s.workspaceContent}>{children}</View>
@@ -263,21 +249,13 @@ const s: any = {
   ...base,
   app: { ...base.app, backgroundColor: C.quartz },
   main: { ...base.main, position: 'relative' },
-  // The primary frame is a living backdrop: warm lava shapes sit behind a single
-  // translucent surface so every tab gets the same calm, refractive workspace.
+  // The pattern is intentionally confined to the workspace frame so the glass
+  // material can be judged without competing with the product chrome.
   workspaceFrame: { width: '100%', position: 'relative', borderRadius: 26, borderWidth: 1, borderColor: 'rgba(255,255,255,.70)', overflow: 'hidden', boxShadow: '0 6px 8px rgba(30,62,43,.08), inset 0 1px 0 rgba(255,255,255,.82)' as never },
   workspaceContent: { position: 'relative', zIndex: 2, gap: 24, padding: 26 },
-  lavaBackdrop: { ...StyleSheet.absoluteFill, overflow: 'hidden', backgroundColor: '#EDE2D4' },
-  lavaAtmosphere: { ...StyleSheet.absoluteFill, backgroundImage: 'radial-gradient(circle at 18% 22%, #FAFBF8 0%, #F1F3EC 48%, #E2E8DB 100%)' as never },
-  lavaCluster: { position: 'absolute', left: '-14%', top: '-30%', width: '128%', height: '160%', filter: 'blur(15px)' as never },
-  lavaBlob: { position: 'absolute', opacity: .84, borderWidth: 1, borderColor: 'rgba(255,255,255,.22)' },
-  lavaCedar: { width: '62%', height: '50%', left: '1%', top: '4%', borderRadius: 260, backgroundColor: '#52763A', backgroundImage: 'linear-gradient(145deg, #365C20 0%, #6B904B 72%, #A8C984 100%)' as never },
-  lavaFern: { width: '70%', height: '55%', right: '-12%', top: '25%', borderRadius: 300, backgroundColor: '#8CAD6B', backgroundImage: 'linear-gradient(155deg, #567C3C 0%, #92B871 58%, #CEE7AE 100%)' as never },
-  lavaMint: { width: '56%', height: '46%', left: '18%', bottom: '-8%', borderRadius: 260, backgroundColor: '#B7D99A', backgroundImage: 'linear-gradient(130deg, #7FA064 0%, #C0E2A1 62%, #E5F0C5 100%)' as never },
-  lavaLeaf: { width: '35%', height: '23%', left: '-3%', top: '48%', borderRadius: 180, backgroundColor: '#7F9D61' },
-  lavaPale: { width: '29%', height: '25%', right: '7%', top: '-3%', borderRadius: 160, backgroundColor: '#CEE7B2' },
-  lavaMoss: { width: '25%', height: '27%', right: '23%', bottom: '-10%', borderRadius: 170, backgroundColor: '#608344' },
-  lavaVignette: { ...StyleSheet.absoluteFill, backgroundImage: 'linear-gradient(110deg, rgba(255,255,255,.14), rgba(255,255,255,.42) 52%, rgba(255,251,244,.18))' as never },
+  argyleBackdrop: { ...StyleSheet.absoluteFill, overflow: 'hidden', backgroundColor: '#315A43', backgroundImage: 'linear-gradient(30deg, #15382B 12%, transparent 12.5%, transparent 87%, #15382B 87.5%, #15382B), linear-gradient(150deg, #15382B 12%, transparent 12.5%, transparent 87%, #15382B 87.5%, #15382B), linear-gradient(30deg, #A95032 12%, transparent 12.5%, transparent 87%, #A95032 87.5%, #A95032), linear-gradient(150deg, #A95032 12%, transparent 12.5%, transparent 87%, #A95032 87.5%, #A95032), linear-gradient(60deg, #C77B45 25%, transparent 25.5%, transparent 75%, #C77B45 75%, #C77B45), linear-gradient(60deg, #547A51 25%, transparent 25.5%, transparent 75%, #547A51 75%, #547A51)' as never, backgroundSize: '96px 166px' as never, backgroundPosition: '0 0, 0 0, 48px 83px, 48px 83px, 0 0, 48px 83px' as never },
+  argyleWash: { ...StyleSheet.absoluteFill, backgroundImage: 'linear-gradient(135deg, rgba(247,242,234,.16) 0%, rgba(247,242,234,0) 44%, rgba(8,32,26,.20) 100%)' as never },
+  argyleVignette: { ...StyleSheet.absoluteFill, backgroundImage: 'radial-gradient(120% 95% at 50% 42%, transparent 45%, rgba(8,32,26,.22) 100%)' as never },
   // A full-surface radial highlight deliberately fades to transparent. Keeping it
   // unbounded avoids the visible horizontal terminus a short overlay produces.
   glassSheen: { ...StyleSheet.absoluteFill, zIndex: 1, backgroundImage: 'radial-gradient(125% 74% at 8% -12%, rgba(255,255,255,.46) 0%, rgba(255,255,255,.16) 34%, rgba(255,255,255,0) 72%)' as never },
