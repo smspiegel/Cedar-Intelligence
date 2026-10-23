@@ -1,0 +1,40 @@
+.cedar-liquid-frame {
+  display: block;
+  width: 100%;
+}
+
+.cedar-liquid-frame > .glass {
+  box-shadow: none !important;
+  box-sizing: border-box;
+  display: block !important;
+  min-height: 100%;
+  width: 100%;
+}
+
+.cedar-liquid-frame .glass__warp {
+  backdrop-filter: blur(8px) saturate(122%) !important;
+  -webkit-backdrop-filter: blur(8px) saturate(122%) !important;
+}
+
+.cedar-liquid-frame .glass > div:last-child {
+  color: inherit !important;
+  font: inherit !important;
+  text-shadow: none !important;
+  width: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cedar-liquid-frame .glass {
+    transition: none !important;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .cedar-liquid-frame > .glass {
+    background: rgba(247, 252, 244, 0.9);
+  }
+
+  .cedar-liquid-frame .glass__warp {
+    filter: none !important;
+  }
+}

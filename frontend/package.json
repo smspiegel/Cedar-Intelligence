@@ -8,6 +8,7 @@
   "dependencies": {
     "@clerk/expo": "^4.14.0",
     "@clerk/expo-native-components": "^0.4.0",
+    "@expo-google-fonts/manrope": "^0.4.2",
     "@expo/ui": "~58.0.22",
     "expo": "~58.0.17",
     "expo-constants": "~58.0.13",
@@ -23,6 +24,7 @@
     "expo-symbols": "~58.0.4",
     "expo-system-ui": "~58.0.6",
     "expo-web-browser": "~58.0.6",
+    "liquid-glass-react": "^1.1.1",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "react-native": "0.88.0",

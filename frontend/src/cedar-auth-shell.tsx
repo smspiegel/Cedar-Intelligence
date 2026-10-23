@@ -1,10 +1,11 @@
 import type { ReactNode } from 'react';
-import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { StyleSheet, useWindowDimensions, View } from 'react-native';
+import { ManropeText as Text } from '@/typography';
 
 export const cedarClerkAppearance = {
   variables: {
     colorPrimary: '#13382A', colorBackground: '#FFFDF9', colorText: '#2A221C', colorTextSecondary: '#65594E', colorInputBackground: '#FFFDF9', colorInputText: '#2A221C', colorDanger: '#A8502A', borderRadius: '8px',
-    fontFamily: 'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    fontFamily: 'Manrope_400Regular, ui-sans-serif, system-ui, sans-serif',
   },
   elements: {
     rootBox: { width: '100%' }, card: { width: '100%', boxShadow: 'none', border: '1px solid #E0D3C1', borderRadius: '12px', backgroundColor: '#FFFDF9' },

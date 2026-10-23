@@ -1,10 +1,11 @@
 import { useAuth, useClerk } from '@clerk/expo';
-import { GlassView, isGlassEffectAPIAvailable } from 'expo-glass-effect';
 import { Redirect } from 'expo-router';
 import { createElement, useEffect, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, { cancelAnimation, Easing, useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
 import { competitors, initialPriorities, initialSources, intelligence as fixture, opportunities, topics, type Intelligence, type Kind, type Opportunity } from '@/cedar-data';
+import { LiquidGlassSurface } from '@/liquid-glass-surface';
+import { ManropeText as Text, ManropeTextInput as TextInput } from '@/typography';
 
 type ScreenName = 'intelligence' | 'detail' | 'competitors' | 'competitor' | 'topics' | 'topic' | 'content' | 'deck' | 'context' | 'incident' | 'settings';
 type Route = { page: ScreenName; id?: string };
@@ -90,11 +91,13 @@ function LavaBackdrop() {
   return <View pointerEvents="none" style={s.lavaBackdrop}><View style={s.lavaAtmosphere} /><View style={s.lavaCluster}><Animated.View style={[s.lavaBlob, s.lavaCedar, cedarBlob]} /><Animated.View style={[s.lavaBlob, s.lavaFern, fernBlob]} /><Animated.View style={[s.lavaBlob, s.lavaMint, mintBlob]} /><View style={[s.lavaBlob, s.lavaLeaf]} /><View style={[s.lavaBlob, s.lavaPale]} /><View style={[s.lavaBlob, s.lavaMoss]} /></View><View style={s.lavaVignette} /></View>;
 }
 function WorkspaceFrame({ children }: { children: React.ReactNode }) {
-  const canUseNativeGlass = isGlassEffectAPIAvailable();
-  const content = <><LavaBackdrop /><View pointerEvents="none" style={s.glassSheen} /><View style={s.workspaceContent}>{children}</View></>;
-  return canUseNativeGlass
-    ? <GlassView glassEffectStyle="clear" tintColor="rgba(255, 251, 244, 0.26)" style={s.workspaceFrame}>{content}</GlassView>
-    : <View style={[s.workspaceFrame, s.workspaceFrameFallback]}>{content}</View>;
+  return <View style={s.workspaceFrame}>
+    <LavaBackdrop />
+    <LiquidGlassSurface>
+      <View pointerEvents="none" style={s.glassSheen} />
+      <View style={s.workspaceContent}>{children}</View>
+    </LiquidGlassSurface>
+  </View>;
 }
 function Page({ children }: { children: React.ReactNode }) { return <ScrollView style={layout.pageScroller} contentContainerStyle={layout.pageContent}><View style={[s.page, layout.page]}><WorkspaceFrame>{children}</WorkspaceFrame></View></ScrollView>; }
 function Popup({ children, close }: { children: React.ReactNode; close: () => void }) { return <Modal transparent visible animationType="fade" onRequestClose={close}><Pressable style={s.backdrop} onPress={close}><Pressable onPress={(event) => event.stopPropagation()} style={s.popup}>{children}</Pressable></Pressable></Modal>; }
@@ -195,8 +198,7 @@ const s: any = {
   app: { ...base.app, backgroundColor: C.quartz },
   // The primary frame is a living backdrop: warm lava shapes sit behind a single
   // translucent surface so every tab gets the same calm, refractive workspace.
-  workspaceFrame: { width: '100%', position: 'relative', borderRadius: 26, borderWidth: 1, borderColor: 'rgba(255,255,255,.70)', overflow: 'hidden', boxShadow: '0 16px 42px rgba(42,34,28,.10), inset 0 1px 0 rgba(255,255,255,.82)' as never },
-  workspaceFrameFallback: { backgroundColor: 'rgba(255,251,245,.62)', backgroundImage: 'linear-gradient(135deg, rgba(255,255,255,.54), rgba(255,244,228,.20) 45%, rgba(255,255,255,.36))' as never },
+  workspaceFrame: { width: '100%', position: 'relative', borderRadius: 26, borderWidth: 1, borderColor: 'rgba(255,255,255,.70)', overflow: 'hidden', boxShadow: '0 6px 8px rgba(30,62,43,.08), inset 0 1px 0 rgba(255,255,255,.82)' as never },
   workspaceContent: { position: 'relative', zIndex: 2, gap: 24, padding: 26 },
   lavaBackdrop: { ...StyleSheet.absoluteFill, overflow: 'hidden', backgroundColor: '#EDE2D4' },
   lavaAtmosphere: { ...StyleSheet.absoluteFill, backgroundImage: 'radial-gradient(circle at 18% 22%, #FAFBF8 0%, #F1F3EC 48%, #E2E8DB 100%)' as never },
