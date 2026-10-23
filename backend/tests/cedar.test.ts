@@ -162,6 +162,15 @@ describe("simplified monitors", () => {
     });
     expect(productionPreflight.headers["access-control-allow-origin"]).toBeUndefined();
     await productionApp.close();
+
+    const configuredProductionApp = buildApp({ ...config, NODE_ENV: "production", CORS_ORIGINS: ["https://cedarintelligence.io"] }, repo, { async start() { return "run"; } });
+    const configuredProductionPreflight = await configuredProductionApp.inject({
+      method: "OPTIONS", url: "/v1/monitors",
+      headers: { origin: "https://cedarintelligence.io", "access-control-request-method": "GET" },
+    });
+    expect(configuredProductionPreflight.statusCode).toBe(204);
+    expect(configuredProductionPreflight.headers["access-control-allow-origin"]).toBe("https://cedarintelligence.io");
+    await configuredProductionApp.close();
   });
 
   it("soft-deletes monitors without deleting findings", async () => {
