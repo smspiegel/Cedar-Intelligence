@@ -1,6 +1,0 @@
-{
-  "matching": [{"externalId":"launch-1","content":"Acme launched Project Birch in Toronto.","sourceURL":"https://example.test/launch-1","publishedAt":"2026-01-02T10:00:00.000Z"}],
-  "nonmatching": [{"externalId":"weather-1","content":"The weather is sunny today.","sourceURL":"https://example.test/weather-1","publishedAt":"2026-01-02T10:00:00.000Z"}],
-  "duplicate": [{"externalId":"launch-1","content":"Acme launched Project Birch in Toronto.","sourceURL":"https://example.test/launch-1","publishedAt":"2026-01-02T10:00:00.000Z"}],
-  "changed": [{"externalId":"launch-1","content":"Acme launched Project Birch globally, expanding beyond Toronto.","sourceURL":"https://example.test/launch-1","publishedAt":"2026-01-03T10:00:00.000Z"}]
-}

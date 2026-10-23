@@ -1,11 +1,9 @@
 import { Surreal } from "surrealdb";
-import type { Evaluation, ExecutionRecord, Finding, Monitor, Observation, Organization } from "../domain.js";
+import type { ExecutionRecord, Finding, Monitor, Observation } from "../domain.js";
 import type { Repository } from "../ports.js";
 import type { AppConfig } from "../config.js";
 
-const withoutRecordId = <T extends { key: string }>(row: T): Omit<T, "key"> & { id: string } => {
-  const { key, ...value } = row; return { ...value, id: key };
-};
+const withoutRecordId = <T extends { key: string }>(row: T): Omit<T, "key"> & { id: string } => { const { key, ...value } = row; return { ...value, id: key }; };
 
 export class SurrealRepository implements Repository {
   constructor(private db: Surreal, private config: AppConfig) {}
@@ -15,7 +13,7 @@ export class SurrealRepository implements Repository {
     await db.signin({ username: config.SURREAL_USERNAME, password: config.SURREAL_PASSWORD });
     return new SurrealRepository(db, config);
   }
-  async initialize() { /* Run `npm run migrate`; intentionally no hidden schema mutation at startup. */ }
+  async initialize() {}
   async ping() { await this.db.query("RETURN true"); }
   async close() { await this.db.close(); }
   private async one<T>(table: string, key: string): Promise<T | null> {
@@ -23,62 +21,80 @@ export class SurrealRepository implements Repository {
     return rows[0] ? withoutRecordId(rows[0]) as T : null;
   }
   private async put(table: string, value: { id: string }, create = false) {
-    const { id, ...data } = value; const statement = create ? "CREATE" : "UPSERT";
-    await this.db.query(`${statement} ${table} CONTENT $data`, { data: { ...data, key: id } });
+    const { id, ...data } = value; await this.db.query(`${create ? "CREATE" : "UPSERT"} ${table} CONTENT $data`, { data: { ...data, key: id } });
   }
-  async getOrganization(id: string) { return this.one<Organization>("organization", id); }
-  async putOrganization(v: Organization) { await this.put("organization", v); }
-  async createMonitor(v: Monitor) { await this.put("monitor", v, true); }
-  async getMonitor(t: string, id: string) { const v = await this.one<Monitor>("monitor", id); return v?.tenantId === t ? v : null; }
-  async listMonitors(t: string) { const [r] = await this.db.query<[Array<Monitor & { key: string }>]>("SELECT * OMIT id FROM monitor WHERE tenantId = $tenant ORDER BY createdAt", { tenant: t }); return r.map(x => withoutRecordId(x) as Monitor); }
-  async updateMonitor(v: Monitor) { await this.put("monitor", v); }
-  async updateMonitorIfVersion(v: Monitor, expectedVersion: number) {
-    const { id, ...data } = v;
-    const [rows] = await this.db.query<[Array<Monitor>]>(
-      "UPDATE monitor CONTENT $data WHERE key = $key AND version = $expected RETURN AFTER",
-      { data: { ...data, key: id }, key: id, expected: expectedVersion },
-    );
+  async createMonitor(value: Monitor) { await this.put("monitor", value, true); }
+  async getMonitor(tenantId: string, id: string) { const value = await this.one<Monitor>("monitor", id); return value?.tenantId === tenantId && !value.deletedAt ? this.normalizeMonitor(value) : null; }
+  async listMonitors(tenantId: string) {
+    const [rows] = await this.db.query<[Array<Monitor & { key: string }>]>("SELECT * OMIT id FROM monitor WHERE tenantId = $tenant AND deletedAt IS NONE ORDER BY createdAt", { tenant: tenantId });
+    return rows.map(row => this.normalizeMonitor(withoutRecordId(row) as Monitor));
+  }
+  async listEnabledMonitors() {
+    const [rows] = await this.db.query<[Array<Monitor & { key: string }>]>("SELECT * OMIT id FROM monitor WHERE enabled = true AND deletedAt IS NONE ORDER BY createdAt");
+    return rows.map(row => this.normalizeMonitor(withoutRecordId(row) as Monitor));
+  }
+  async updateMonitorIfVersion(value: Monitor, expectedVersion: number) {
+    const { id, ...data } = value;
+    const [rows] = await this.db.query<[Array<Monitor>]>("UPDATE monitor CONTENT $data WHERE key = $key AND version = $expected RETURN AFTER", { data: { ...data, key: id }, key: id, expected: expectedVersion });
     return rows.length === 1;
   }
-  async createExecution(v: ExecutionRecord) { await this.put("execution", v, true); }
-  async getExecution(t: string, id: string) { const v = await this.one<ExecutionRecord>("execution", id); return v?.tenantId === t ? v : null; }
+  async createExecution(value: ExecutionRecord) { await this.put("execution", value, true); }
+  async getExecution(tenantId: string, id: string) { const value = await this.one<ExecutionRecord>("execution", id); return value?.tenantId === tenantId ? value : null; }
   async getExecutionInternal(id: string) { return this.one<ExecutionRecord>("execution", id); }
-  async listExecutions(t: string, monitorId?: string, limit = 50) {
+  async listExecutions(tenantId: string, monitorId?: string, limit = 50) {
     const where = monitorId ? "tenantId = $tenant AND monitorId = $monitor" : "tenantId = $tenant";
-    const [r] = await this.db.query<[Array<ExecutionRecord & { key: string }>]>(
-      `SELECT * OMIT id FROM execution WHERE ${where} ORDER BY createdAt DESC LIMIT $limit`,
-      { tenant: t, monitor: monitorId, limit },
-    );
-    return r.map(x => withoutRecordId(x) as ExecutionRecord);
+    const [rows] = await this.db.query<[Array<ExecutionRecord & { key: string }>]>(`SELECT * OMIT id FROM execution WHERE ${where} ORDER BY createdAt DESC LIMIT $limit`, { tenant: tenantId, monitor: monitorId, limit });
+    return rows.map(row => withoutRecordId(row) as ExecutionRecord);
   }
-  async updateExecution(v: ExecutionRecord) { await this.put("execution", v); }
-  async putObservation(v: Observation) { return this.insertOnce("observation", v); }
-  async putEvaluation(v: Evaluation) { await this.put("evaluation", v); }
-  async putFinding(v: Finding) { return this.insertOnce("finding", v); }
-  private async insertOnce(table: string, v: { id: string }) {
-    const { id, ...data } = v;
-    // A single insert statement makes replay protection safe when workflow retries
-    // overlap. RETURN BEFORE is empty for a new record and returns the existing row
-    // when the table's unique key index sees a duplicate.
-    const [before] = await this.db.query<[Array<{ key: string }>]>(
-      `INSERT INTO ${table} $data ON DUPLICATE KEY UPDATE key = key RETURN BEFORE`,
-      { data: { ...data, key: id } },
-    );
+  async hasActiveExecution(monitorId: string) {
+    const [rows] = await this.db.query<[Array<{ key: string }>]>("SELECT key FROM execution WHERE monitorId = $monitor AND status IN ['queued', 'running'] LIMIT 1", { monitor: monitorId });
+    return rows.length > 0;
+  }
+  async updateExecution(value: ExecutionRecord) { await this.put("execution", value); }
+  async setExecutionRenderRunId(id: string, renderRunId: string) { await this.db.query("UPDATE execution SET renderRunId = $renderRunId WHERE key = $key", { key: id, renderRunId }); }
+  async putObservation(value: Observation) { return this.insertOnce("observation", value); }
+  async getObservation(id: string) { return this.one<Observation>("observation", id); }
+  async markObservationProcessed(id: string, processedAt: string) { await this.db.query("UPDATE observation SET processedAt = $processedAt WHERE key = $key", { key: id, processedAt }); }
+  async putFinding(value: Finding) { return this.insertOnce("finding", value); }
+  private async insertOnce(table: string, value: { id: string }) {
+    const { id, ...data } = value;
+    const [before] = await this.db.query<[Array<{ key: string }>]>(`INSERT INTO ${table} $data ON DUPLICATE KEY UPDATE key = key RETURN BEFORE`, { data: { ...data, key: id } });
     return before.length === 0;
   }
-  async listFindings(t: string, monitorId?: string) {
+  async listFindings(tenantId: string, monitorId?: string) {
     const where = monitorId ? "tenantId = $tenant AND monitorId = $monitor" : "tenantId = $tenant";
-    const [r] = await this.db.query<[Array<Finding & { key: string }>]>(`SELECT * OMIT id FROM finding WHERE ${where} ORDER BY createdAt DESC`, { tenant: t, monitor: monitorId });
-    return r.map(x => withoutRecordId(x) as Finding);
+    const [rows] = await this.db.query<[Array<Finding & { key: string }>]>(`SELECT * OMIT id FROM finding WHERE ${where} ORDER BY createdAt DESC`, { tenant: tenantId, monitor: monitorId });
+    return Promise.all(rows.map(row => this.normalizeFinding(withoutRecordId(row) as Finding)));
   }
-  async getFinding(t: string, id: string) { const v = await this.one<Finding>("finding", id); return v?.tenantId === t ? v : null; }
-  async getObservations(t: string, ids: string[]) {
-    if (ids.length === 0) return [];
-    const [r] = await this.db.query<[Array<Observation & { key: string }>]>(
-      "SELECT * OMIT id FROM observation WHERE tenantId = $tenant AND key IN $ids",
-      { tenant: t, ids },
-    );
-    const byId = new Map(r.map(row => [row.key, withoutRecordId(row) as Observation]));
+  async countFindings(tenantId: string, monitorId: string) {
+    const [rows] = await this.db.query<[Array<{ count: number }>]>("SELECT count() AS count FROM finding WHERE tenantId = $tenant AND monitorId = $monitor GROUP ALL", { tenant: tenantId, monitor: monitorId });
+    return rows[0]?.count ?? 0;
+  }
+  async getFinding(tenantId: string, id: string) { const value = await this.one<Finding>("finding", id); return value?.tenantId === tenantId ? this.normalizeFinding(value) : null; }
+  async getObservations(tenantId: string, ids: string[]) {
+    if (!ids.length) return [];
+    const [rows] = await this.db.query<[Array<Observation & { key: string }>]>("SELECT * OMIT id FROM observation WHERE tenantId = $tenant AND key IN $ids", { tenant: tenantId, ids });
+    const byId = new Map(rows.map(row => [row.key, withoutRecordId(row) as Observation]));
     return ids.flatMap(id => byId.get(id) ? [byId.get(id)!] : []);
+  }
+  private normalizeMonitor(value: Monitor) {
+    const legacy = value as Monitor & {
+      instructions?: string; priority?: "P1" | "P2" | "P3";
+      context?: unknown; memoryScope?: unknown; sources?: unknown;
+    };
+    const queries = Array.isArray(legacy.queries) && legacy.queries.length ? legacy.queries : [legacy.name];
+    const trigger = legacy.trigger ?? legacy.instructions ?? legacy.name;
+    const bucket = legacy.bucket ?? (legacy.priority === "P1" ? "threat" : legacy.priority === "P2" ? "flag" : "opportunity");
+    const { instructions: _instructions, priority: _priority, context: _context, memoryScope: _memoryScope, sources: _sources, ...monitor } = legacy;
+    return { ...monitor, queries, trigger, bucket } as Monitor;
+  }
+  private async normalizeFinding(value: Finding) {
+    const legacy = value as Finding & { priority?: "P1" | "P2" | "P3"; observationIds?: string[] };
+    const observationId = legacy.observationId ?? legacy.observationIds?.[0];
+    const bucket = legacy.bucket ?? (legacy.priority === "P1" ? "threat" : legacy.priority === "P2" ? "flag" : "opportunity");
+    const { priority: _priority, observationIds: _observationIds, ...finding } = legacy;
+    if (legacy.sourceUrl || !observationId) return { ...finding, observationId, bucket } as Finding;
+    const observation = await this.one<Observation & { sourceURL?: string }>("observation", observationId);
+    return { ...finding, observationId, bucket, sourceUrl: observation?.sourceUrl ?? observation?.sourceURL } as Finding;
   }
 }

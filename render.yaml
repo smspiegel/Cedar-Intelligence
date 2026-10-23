@@ -75,12 +75,38 @@ projects:
                 sync: false
               - key: EVALUATOR_MODEL
                 value: gpt-5-mini
-              - key: AGENT_MEMORY_ENDPOINT
+              - key: EXA_API_KEY
                 sync: false
-              - key: AGENT_MEMORY_CONTEXT
+              - key: EXA_RESULTS_PER_QUERY
+                value: 10
+
+          - type: cron
+            name: cedar-monitor-scheduler
+            runtime: node
+            region: oregon
+            schedule: "0 */6 * * *"
+            rootDir: backend
+            buildCommand: npm ci --include=dev && npm run build
+            startCommand: npm run schedule
+            envVars:
+              - key: NODE_VERSION
+                value: 22
+              - key: NODE_ENV
+                value: production
+              - key: SURREAL_URL
                 sync: false
-              - key: AGENT_MEMORY_API_KEY
+              - key: SURREAL_NAMESPACE
+                value: cedar
+              - key: SURREAL_DATABASE
+                value: cedar
+              - key: SURREAL_USERNAME
                 sync: false
+              - key: SURREAL_PASSWORD
+                sync: false
+              - key: RENDER_API_KEY
+                sync: false
+              - key: RENDER_WORKFLOW_SLUG
+                value: cedar-workflow
 
           - type: web
             name: Cedar-Intelligence

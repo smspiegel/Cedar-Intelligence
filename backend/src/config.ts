@@ -21,10 +21,10 @@ const Config = z.object({
   SURREAL_NAMESPACE: z.string().default("cedar"), SURREAL_DATABASE: z.string().default("cedar"),
   SURREAL_USERNAME: z.string().default("root"), SURREAL_PASSWORD: z.string().default("root"),
   RENDER_WORKFLOW_SLUG: z.string().default("cedar-workflow"),
+  EXA_API_URL: z.string().url().default("https://api.exa.ai/search"), EXA_API_KEY: optionalString,
+  EXA_RESULTS_PER_QUERY: z.coerce.number().int().min(1).max(25).default(10),
   EVALUATOR_URL: optionalUrl, EVALUATOR_API_KEY: optionalString,
   EVALUATOR_MODEL: z.string().default("gpt-5-mini"),
-  AGENT_MEMORY_ENDPOINT: optionalUrl, AGENT_MEMORY_CONTEXT: optionalString,
-  AGENT_MEMORY_API_KEY: optionalString, SEEDED_CONTEXT: z.string().default("Project Cedar seeded development context."),
 });
 export type AppConfig = z.infer<typeof Config>;
 export const loadConfig = (env: NodeJS.ProcessEnv = process.env): AppConfig => Config.parse(env);
