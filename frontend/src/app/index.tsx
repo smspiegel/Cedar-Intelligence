@@ -2,7 +2,7 @@ import { useAuth, useClerk } from '@clerk/expo';
 import Slider from '@react-native-community/slider';
 import { Redirect } from 'expo-router';
 import { createContext, createElement, useContext, useEffect, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Image, Modal, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, { cancelAnimation, Easing, useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
 import { competitors, initialPriorities, initialSources, intelligence as fixture, opportunities, topics, type Intelligence, type Kind, type Opportunity } from '@/cedar-data';
 import { defaultGlassSettings, glassLimits, glassSteps, type GlassSettings } from '@/glass-settings';
@@ -13,6 +13,7 @@ type ScreenName = 'intelligence' | 'detail' | 'competitors' | 'competitor' | 'to
 type Route = { page: ScreenName; id?: string };
 type Draft = { title: string; note: string; body: string; sources: string[] };
 const GlassSettingsContext = createContext<GlassSettings>(defaultGlassSettings);
+const forestBackdrop = require('../../assets/images/realimages/forest-blurred.png');
 const C = {
   abyss: '#08201A', bark: '#2A221C', copper: '#C77B45', copperLight: '#E9C88E', rust: '#A8502A',
   quartz: '#F7F2EA', sandstone: '#E8DDCB', mint: '#6EDDB0', oldGrowth: '#13382A',
@@ -91,6 +92,16 @@ function CedarWorkspace({ signOut = () => {} }: { signOut?: () => void }) {
 function T({ children, h = false }: { children: React.ReactNode; h?: boolean }) { return <Text style={h ? s.h1 : s.h2}>{children}</Text>; }
 function Meta({ children }: { children: React.ReactNode }) { return <Text style={s.meta}>{children}</Text>; }
 function Card({ children, style }: { children: React.ReactNode; style?: object }) { return <View style={[s.card, style]}>{children}</View>; }
+function MirroredForestField({ children }: { children: React.ReactNode }) {
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  const tileHeight = size.width * 1542 / 1178;
+  const tileCount = tileHeight > 0 ? Math.max(1, Math.ceil(size.height / tileHeight)) : 0;
+  return <View onLayout={(event) => { const { width, height } = event.nativeEvent.layout; setSize((current) => current.width === width && current.height === height ? current : { width, height }); }} style={s.intelligenceField}>
+    <View pointerEvents="none" style={s.intelligenceForestLayer}>{Array.from({ length: tileCount }, (_, index) => <Image key={index} source={forestBackdrop} resizeMode="stretch" style={[s.intelligenceForestTile, { height: tileHeight, top: index * tileHeight, transform: [{ scaleY: index % 2 ? -1 : 1 }] }]} />)}</View>
+    <View style={s.intelligenceFieldContent}>{children}</View>
+  </View>;
+}
+function IntelligenceSurface({ children, style, contentStyle }: { children: React.ReactNode; style?: object; contentStyle?: object }) { return <View style={[s.intelligenceSurface, style]}><View style={[s.intelligenceShade, contentStyle]}>{children}</View></View>; }
 function Button({ text, press, primary = false, danger = false }: { text: string; press: () => void; primary?: boolean; danger?: boolean }) { const [hovered, setHovered] = useState(false); const variant = primary ? 'primary' : danger ? 'danger' : 'secondary'; return <Pressable accessibilityRole="button" accessibilityLabel={text} onPress={press} onHoverIn={() => setHovered(true)} onHoverOut={() => setHovered(false)} style={({ pressed }) => [primary ? s.primary : s.button, variant === 'primary' ? interaction.primaryButton : variant === 'danger' ? interaction.dangerButton : interaction.secondaryButton, hovered && (variant === 'primary' ? interaction.primaryHover : variant === 'danger' ? interaction.dangerHover : interaction.buttonHover), pressed && interaction.buttonPressed]}><Text style={variant === 'primary' ? [s.primaryText, interaction.primaryButtonText] : variant === 'danger' ? interaction.dangerButtonText : [s.buttonText, interaction.secondaryButtonText]}>{text}</Text></Pressable>; }
 function Glyph({ name, color = C.text, size = 18 }: { name: GlyphName; color?: string; size?: number }) { return <View style={[s.glyph, { width: size, height: size }]}>{createElement('svg', { xmlns: 'http://www.w3.org/2000/svg', width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: color, strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true, focusable: false }, glyph[name].map((d, index) => createElement('path', { d, key: index })))}</View>; }
 function GlyphButton({ name, press, color = C.text, hint }: { name: GlyphName; press: () => void; color?: string; hint?: string }) { const [hovered, setHovered] = useState(false); const cedar = name === 'cedar'; return <View style={interaction.glyphControl}><Pressable onPress={press} accessibilityRole="button" accessibilityLabel={hint ?? name} accessibilityHint={hint} onHoverIn={() => setHovered(true)} onHoverOut={() => setHovered(false)} style={[s.icon, cedar && s.cedarOrb, hovered && (cedar ? s.cedarOrbHover : interaction.glyphButtonHover)]}><Glyph name={name} color={cedar ? C.abyss : color} size={cedar ? 15 : 18} /></Pressable>{hint && hovered && <View pointerEvents="none" style={interaction.hoverHint}><Text style={interaction.hoverHintText}>{hint}</Text></View>}</View>; }
@@ -107,7 +118,7 @@ function LavaBackdrop() {
   const cedarBlob = useAnimatedStyle(() => ({ transform: [{ translateX: -65 + slowDrift.value * 130 }, { translateY: 28 - rise.value * 82 }, { scale: .96 + pulse.value * .12 }] }));
   const fernBlob = useAnimatedStyle(() => ({ transform: [{ translateX: 26 - slowDrift.value * 100 }, { translateY: -54 + rise.value * 118 }, { scale: 1 + pulse.value * .14 }] }));
   const mintBlob = useAnimatedStyle(() => ({ transform: [{ translateX: -20 + rise.value * 80 }, { translateY: 44 - pulse.value * 92 }, { scale: .9 + slowDrift.value * .17 }] }));
-  return <View pointerEvents="none" style={s.argyleBackdrop}><View style={s.argyleWash} /><View style={s.lavaCluster}><Animated.View style={[s.lavaBlob, s.lavaCedar, cedarBlob]} /><Animated.View style={[s.lavaBlob, s.lavaFern, fernBlob]} /><Animated.View style={[s.lavaBlob, s.lavaMint, mintBlob]} /><View style={[s.lavaBlob, s.lavaLeaf]} /><View style={[s.lavaBlob, s.lavaPale]} /><View style={[s.lavaBlob, s.lavaMoss]} /></View><View style={s.argyleVignette} /></View>;
+  return <View pointerEvents="none" style={s.lavaBackdrop}><View style={s.lavaCluster}><Animated.View style={[s.lavaBlob, s.lavaCedar, cedarBlob]} /><Animated.View style={[s.lavaBlob, s.lavaFern, fernBlob]} /><Animated.View style={[s.lavaBlob, s.lavaMint, mintBlob]} /><View style={[s.lavaBlob, s.lavaLeaf]} /><View style={[s.lavaBlob, s.lavaPale]} /><View style={[s.lavaBlob, s.lavaMoss]} /></View><View style={s.lavaVignette} /></View>;
 }
 function WorkspaceFrame({ children }: { children: React.ReactNode }) {
   const settings = useContext(GlassSettingsContext);
@@ -171,8 +182,8 @@ function Popup({ children, close }: { children: React.ReactNode; close: () => vo
 function Sidebar({ route, unread, go, notes, signOut }: { route: Route; unread: number; go: (route: Route) => void; notes: () => void; signOut: () => void }) { const active = route.page === 'detail' ? 'intelligence' : route.page === 'competitor' ? 'competitors' : route.page === 'topic' ? 'context' : route.page; return <View style={s.sidebar}><View style={s.workspace}><View><Text style={s.workspaceName}>cedar</Text><Text style={s.workspaceMeta}>Acme</Text></View></View>{nav.map(([icon, label, page]) => <Pressable key={page} onPress={() => go({ page })} style={[s.nav, active === page && s.navOn]}><View style={s.navIcon}><Glyph name={icon} color={active === page ? C.mint : C.sandstone} size={20} /></View><Text style={[s.navText, active === page && s.navTextOn]}>{label}</Text></Pressable>)}<View style={s.navBottom}><Pressable onPress={() => go({ page: 'settings' })} style={[s.nav, route.page === 'settings' && s.navOn]}><View style={s.navIcon}><Glyph name="settings" color={route.page === 'settings' ? C.mint : C.sandstone} size={16} /></View><Text style={[s.navText, route.page === 'settings' && s.navTextOn]}>Settings</Text></Pressable><Pressable onPress={notes} style={s.nav}><View style={s.navIcon}><Glyph name="bell" color={C.sandstone} size={16} /></View><Text style={s.navText}>Notifications</Text>{unread > 0 && <View style={s.count}><Text style={s.countText}>{unread}</Text></View>}</Pressable><Pressable onPress={signOut} style={s.nav}><View style={s.navIcon}><Glyph name="close" color={C.sandstone} size={16} /></View><Text style={s.navText}>Sign out</Text></Pressable><View style={s.user}><View style={s.avatar}><Text style={s.avatarText}>JA</Text></View><View><Text style={s.userName}>Jordan Avery</Text><Text style={s.workspaceMeta}>Communications Lead</Text></View></View></View></View>; }
 function Header({ title, subtitle, back, press, right }: { title: string; subtitle?: string; back?: string; press?: () => void; right?: React.ReactNode }) { return <View style={s.header}>{back && <Pressable onPress={press}><Text style={s.back}>← {back}</Text></Pressable>}<View style={s.headerRow}><View style={s.headerCopy}><T h>{title}</T>{subtitle && <Text style={s.subtitle}>{subtitle}</Text>}</View>{right}</View></View>; }
 
-function Home({ items, open, attach, briefing: openBriefing }: { items: Intelligence[]; open: (id: string) => void; attach: (id: string) => void; briefing: () => void }) { const topThreat = items.find((item) => item.kind === 'threat'); const topOpportunity = items.find((item) => item.kind === 'opportunity'); return <Page><Header title="Intelligence" subtitle="The signals that need your attention, with a clear read on what to do next." right={<Button text="Open today’s briefing →" press={openBriefing} />} /><View style={s.topRead}><View style={s.topReadCell}><Text style={s.eyebrow}>TOP THREAT</Text><Pressable onPress={() => topThreat && open(topThreat.id)}><Text style={s.topReadTitle}>{topThreat?.headline}</Text></Pressable><Text style={s.smallCopy}>{topThreat?.summary}</Text></View><View style={s.topReadDivider} /><View style={s.topReadCell}><Text style={s.eyebrow}>TOP OPPORTUNITY</Text><Pressable onPress={() => topOpportunity && open(topOpportunity.id)}><Text style={s.topReadTitle}>{topOpportunity?.headline}</Text></Pressable><Text style={s.smallCopy}>{topOpportunity?.summary}</Text></View></View><View style={s.homeHead}><View style={s.headlines}><Meta>WEDNESDAY, OCTOBER 21</Meta><Text style={s.sectionLead}>Latest intelligence</Text></View></View><View style={s.grid}>{items.map((item, index) => <Story key={item.id} item={item} lead={index === 0} open={open} attach={attach} />)}</View></Page>; }
-function Story({ item, lead, open, attach }: { item: Intelligence; lead: boolean; open: (id: string) => void; attach: (id: string) => void }) { const compact = useWindowDimensions().width < 700; return <Card style={[s.story, lead && s.lead, compact && s.mobileStory]}><Pressable onPress={() => open(item.id)} style={s.storyInner}><Badge kind={item.kind} /><Text style={[s.storyTitle, lead && s.leadTitle]}>{item.headline}</Text><Text numberOfLines={lead ? 4 : 3} style={s.copy}>{item.summary}</Text>{lead && item.recommendation && <View style={s.recommend}><Glyph name="cedar" color={C.rust} size={14} /><Text style={s.recommendText}>Cedar recommends: {item.recommendation}</Text></View>}<View style={s.storyFoot}><Meta>Updated {item.updatedAt}</Meta><GlyphButton name="cedar" color={C.oldGrowth} hint="Ask Cedar" press={() => attach(item.id)} /></View></Pressable></Card>; }
+function Home({ items, open, attach, briefing: openBriefing }: { items: Intelligence[]; open: (id: string) => void; attach: (id: string) => void; briefing: () => void }) { const compact = useWindowDimensions().width < 700; const topThreat = items.find((item) => item.kind === 'threat'); const topOpportunity = items.find((item) => item.kind === 'opportunity'); return <Page><Header title="Intelligence" subtitle="The signals that need your attention, with a clear read on what to do next." right={<Button text="Open today’s briefing →" press={openBriefing} />} /><MirroredForestField><IntelligenceSurface style={s.topRead} contentStyle={[s.topReadContent, compact && s.topReadContentCompact]}><View style={[s.topReadCell, compact && s.topReadCellCompact]}><Text style={s.intelligenceEyebrow}>TOP THREAT</Text><Pressable onPress={() => topThreat && open(topThreat.id)}><Text style={s.topReadTitle}>{topThreat?.headline}</Text></Pressable><Text style={s.intelligenceSmallCopy}>{topThreat?.summary}</Text></View><View style={[s.topReadDivider, compact && s.topReadDividerCompact]} /><View style={[s.topReadCell, compact && s.topReadCellCompact]}><Text style={s.intelligenceEyebrow}>TOP OPPORTUNITY</Text><Pressable onPress={() => topOpportunity && open(topOpportunity.id)}><Text style={s.topReadTitle}>{topOpportunity?.headline}</Text></Pressable><Text style={s.intelligenceSmallCopy}>{topOpportunity?.summary}</Text></View></IntelligenceSurface><View style={[s.homeHead, s.intelligenceHomeHead]}><View style={s.headlines}><Text style={s.intelligenceMeta}>WEDNESDAY, OCTOBER 21</Text><Text style={s.intelligenceSectionLead}>Latest intelligence</Text></View></View><View style={s.grid}>{items.map((item, index) => <Story key={item.id} item={item} lead={index === 0} open={open} attach={attach} />)}</View></MirroredForestField></Page>; }
+function Story({ item, lead, open, attach }: { item: Intelligence; lead: boolean; open: (id: string) => void; attach: (id: string) => void }) { const compact = useWindowDimensions().width < 700; return <IntelligenceSurface style={[s.story, lead && s.lead, compact && s.mobileStory]}><Pressable onPress={() => open(item.id)} style={s.storyInner}><Badge kind={item.kind} /><Text style={[s.intelligenceStoryTitle, lead && s.leadTitle]}>{item.headline}</Text><Text numberOfLines={lead ? 4 : 3} style={s.intelligenceCopy}>{item.summary}</Text>{lead && item.recommendation && <View style={s.recommend}><Glyph name="cedar" color={C.mint} size={14} /><Text style={s.intelligenceRecommendText}>Cedar recommends: {item.recommendation}</Text></View>}<View style={s.storyFoot}><Text style={s.intelligenceMeta}>Updated {item.updatedAt}</Text><GlyphButton name="cedar" color={C.oldGrowth} hint="Ask Cedar" press={() => attach(item.id)} /></View></Pressable></IntelligenceSurface>; }
 
 
 function Tabs({ labels, selected, set }: { labels: string[]; selected: string; set: (value: string) => void }) { const companyContext = labels.includes('Strategy'); return <View style={s.tabWrap}><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[s.tabs, interaction.tabs]}><View style={interaction.tabRow}>{labels.map((label) => <Pressable key={label} accessibilityRole="tab" accessibilityState={{ selected: selected === label }} onPress={() => set(label)} style={[s.tab, interaction.tab, selected === label && s.tabOn]}><Text style={[s.tabText, interaction.tabText, selected === label && interaction.tabTextOn]}>{label}</Text></Pressable>)}</View></ScrollView>{companyContext && <View style={s.contextThemes}><Text style={s.contextThemesLabel}>TRACKED THEMES</Text>{topics.slice(0, 4).map((topic) => <View key={topic.id} style={s.contextTheme}><Text style={s.contextThemeName}>{topic.name}</Text><Text style={s.contextThemeMeta}>{topic.state} · {topic.count} {topic.unit}</Text></View>)}</View>}</View>; }
@@ -262,22 +273,21 @@ const base = StyleSheet.create({
 const s: any = {
   ...base,
   app: { ...base.app, backgroundColor: C.quartz },
-  main: { ...base.main, position: 'relative' },
-  // The pattern is intentionally confined to the workspace frame so the glass
-  // material can be judged without competing with the product chrome.
+  main: { ...base.main, position: 'relative', backgroundColor: '#315A43', backgroundImage: 'linear-gradient(30deg, #15382B 12%, transparent 12.5%, transparent 87%, #15382B 87.5%, #15382B), linear-gradient(150deg, #15382B 12%, transparent 12.5%, transparent 87%, #15382B 87.5%, #15382B), linear-gradient(30deg, #A95032 12%, transparent 12.5%, transparent 87%, #A95032 87.5%, #A95032), linear-gradient(150deg, #A95032 12%, transparent 12.5%, transparent 87%, #A95032 87.5%, #A95032), linear-gradient(60deg, #C77B45 25%, transparent 25.5%, transparent 75%, #C77B45 75%, #C77B45), linear-gradient(60deg, #547A51 25%, transparent 25.5%, transparent 75%, #547A51 75%, #547A51)' as never, backgroundSize: '96px 166px' as never, backgroundPosition: '0 0, 0 0, 48px 83px, 48px 83px, 0 0, 48px 83px' as never },
+  // The frame is transparent apart from its material, so the main argyle field
+  // continues beneath it while lava remains a local animated layer.
   workspaceFrame: { width: '100%', position: 'relative', borderRadius: 26, borderWidth: 1, borderColor: 'rgba(255,255,255,.70)', overflow: 'hidden', boxShadow: '0 6px 8px rgba(30,62,43,.08), inset 0 1px 0 rgba(255,255,255,.82)' as never },
   workspaceContent: { position: 'relative', zIndex: 2, gap: 24, padding: 26 },
-  argyleBackdrop: { ...StyleSheet.absoluteFill, overflow: 'hidden', backgroundColor: '#315A43', backgroundImage: 'linear-gradient(30deg, #15382B 12%, transparent 12.5%, transparent 87%, #15382B 87.5%, #15382B), linear-gradient(150deg, #15382B 12%, transparent 12.5%, transparent 87%, #15382B 87.5%, #15382B), linear-gradient(30deg, #A95032 12%, transparent 12.5%, transparent 87%, #A95032 87.5%, #A95032), linear-gradient(150deg, #A95032 12%, transparent 12.5%, transparent 87%, #A95032 87.5%, #A95032), linear-gradient(60deg, #C77B45 25%, transparent 25.5%, transparent 75%, #C77B45 75%, #C77B45), linear-gradient(60deg, #547A51 25%, transparent 25.5%, transparent 75%, #547A51 75%, #547A51)' as never, backgroundSize: '96px 166px' as never, backgroundPosition: '0 0, 0 0, 48px 83px, 48px 83px, 0 0, 48px 83px' as never },
-  argyleWash: { ...StyleSheet.absoluteFill, backgroundImage: 'linear-gradient(135deg, rgba(247,242,234,.16) 0%, rgba(247,242,234,0) 44%, rgba(8,32,26,.20) 100%)' as never },
+  lavaBackdrop: { ...StyleSheet.absoluteFill, overflow: 'hidden' },
   lavaCluster: { position: 'absolute', left: '-14%', top: '-30%', width: '128%', height: '160%', filter: 'blur(15px)' as never },
-  lavaBlob: { position: 'absolute', opacity: .74, borderWidth: 1, borderColor: 'rgba(255,255,255,.22)' },
+  lavaBlob: { position: 'absolute', opacity: .68, borderWidth: 1, borderColor: 'rgba(255,255,255,.22)' },
   lavaCedar: { width: '62%', height: '50%', left: '1%', top: '4%', borderRadius: 260, backgroundColor: '#52763A', backgroundImage: 'linear-gradient(145deg, #365C20 0%, #6B904B 72%, #A8C984 100%)' as never },
   lavaFern: { width: '70%', height: '55%', right: '-12%', top: '25%', borderRadius: 300, backgroundColor: '#8CAD6B', backgroundImage: 'linear-gradient(155deg, #567C3C 0%, #92B871 58%, #CEE7AE 100%)' as never },
   lavaMint: { width: '56%', height: '46%', left: '18%', bottom: '-8%', borderRadius: 260, backgroundColor: '#B7D99A', backgroundImage: 'linear-gradient(130deg, #7FA064 0%, #C0E2A1 62%, #E5F0C5 100%)' as never },
   lavaLeaf: { width: '35%', height: '23%', left: '-3%', top: '48%', borderRadius: 180, backgroundColor: '#7F9D61' },
   lavaPale: { width: '29%', height: '25%', right: '7%', top: '-3%', borderRadius: 160, backgroundColor: '#CEE7B2' },
   lavaMoss: { width: '25%', height: '27%', right: '23%', bottom: '-10%', borderRadius: 170, backgroundColor: '#608344' },
-  argyleVignette: { ...StyleSheet.absoluteFill, backgroundImage: 'radial-gradient(120% 95% at 50% 42%, transparent 45%, rgba(8,32,26,.22) 100%)' as never },
+  lavaVignette: { ...StyleSheet.absoluteFill, backgroundImage: 'radial-gradient(120% 95% at 50% 42%, transparent 45%, rgba(8,32,26,.22) 100%)' as never },
   // A full-surface radial highlight deliberately fades to transparent. Keeping it
   // unbounded avoids the visible horizontal terminus a short overlay produces.
   glassSheen: { ...StyleSheet.absoluteFill, zIndex: 1, backgroundImage: 'radial-gradient(125% 74% at 8% -12%, rgba(255,255,255,.46) 0%, rgba(255,255,255,.16) 34%, rgba(255,255,255,0) 72%)' as never },
@@ -310,10 +320,28 @@ const s: any = {
   button: { ...base.button, backgroundColor: 'rgba(255,253,249,.66)', borderColor: 'rgba(199,123,69,.42)', borderRadius: 999 },
   cedarOrb: { width: 34, height: 34, borderRadius: 18, alignItems: 'center', justifyContent: 'center', padding: 0, backgroundColor: C.copper, backgroundImage: 'linear-gradient(135deg, #C77B45 20%, #E9C88E 50%, #C77B45 80%)' as never, boxShadow: '0 6px 15px rgba(42,34,28,.18)' as never },
   cedarOrbHover: { transform: [{ scale: 1.08 }], opacity: .92 },
-  topRead: { flexDirection: 'row', borderRadius: 15, borderWidth: 1, borderColor: 'rgba(199,123,69,.28)', overflow: 'hidden', backgroundColor: 'rgba(255,253,249,.54)', backgroundImage: 'linear-gradient(135deg, rgba(199,123,69,.055) 20%, rgba(233,200,142,.15) 50%, rgba(199,123,69,.055) 80%)' as never },
-  topReadCell: { flex: 1, minHeight: 148, padding: 22, gap: 9, backgroundColor: 'rgba(255,253,249,.50)' },
-  topReadDivider: { width: 1, backgroundColor: 'rgba(199,123,69,.20)' },
-  topReadTitle: { color: C.bark, fontSize: 19, lineHeight: 25, fontWeight: '700' },
+  intelligenceField: { position: 'relative', overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(167,218,187,.28)', borderRadius: 18, backgroundColor: C.abyss, boxShadow: '0 10px 24px rgba(8,32,26,.16)' as never },
+  intelligenceForestLayer: { ...StyleSheet.absoluteFill, opacity: .82 },
+  intelligenceForestTile: { position: 'absolute', left: 0, width: '100%' },
+  intelligenceFieldContent: { position: 'relative', zIndex: 1, gap: 18, padding: 14 },
+  intelligenceSurface: { overflow: 'hidden', backgroundColor: 'rgba(5,24,17,.68)', borderWidth: 1, borderColor: 'rgba(167,218,187,.32)', borderRadius: 14, boxShadow: '0 7px 18px rgba(8,32,26,.14)' as never },
+  intelligenceShade: { flex: 1 },
+  intelligenceEyebrow: { color: '#9EEBC7', fontSize: 10.5, fontWeight: '800', letterSpacing: .7 },
+  intelligenceStoryTitle: { color: C.quartz, fontSize: 16, lineHeight: 21, fontWeight: '700' },
+  intelligenceCopy: { color: '#E1EDE5', fontSize: 13.5, lineHeight: 20, flexShrink: 1 },
+  intelligenceSmallCopy: { color: '#D8E9DE', fontSize: 12.5, lineHeight: 18 },
+  intelligenceRecommendText: { color: '#D8E9DE', fontSize: 12.5, lineHeight: 18, flex: 1 },
+  intelligenceMeta: { color: '#B9D2C2', fontSize: 11.5, lineHeight: 16 },
+  intelligenceHomeHead: { paddingHorizontal: 2 },
+  intelligenceSectionLead: { color: C.quartz, fontSize: 19, fontWeight: '700' },
+  topRead: { borderRadius: 15 },
+  topReadContent: { flex: 1, flexDirection: 'row', backgroundColor: 'rgba(5,24,17,.10)' },
+  topReadContentCompact: { flexDirection: 'column' },
+  topReadCell: { flex: 1, minHeight: 148, padding: 22, gap: 9 },
+  topReadCellCompact: { minHeight: 0 },
+  topReadDivider: { width: 1, backgroundColor: 'rgba(214,241,224,.24)' },
+  topReadDividerCompact: { width: '100%', height: 1 },
+  topReadTitle: { color: C.quartz, fontSize: 19, lineHeight: 25, fontWeight: '700' },
   sectionLead: { color: C.bark, fontSize: 19, fontWeight: '700' },
   matrixCard: { padding: 22, gap: 16, borderColor: 'rgba(199,123,69,.30)' },
   matrixHead: { flexDirection: 'row', justifyContent: 'space-between', gap: 18, alignItems: 'flex-start' },
@@ -338,7 +366,7 @@ const s: any = {
   assigneeAvatarText: { color: C.quartz, fontSize: 9.5, fontWeight: '800' },
   assigneeText: { color: C.bark, fontSize: 12, fontWeight: '700' },
   draftAssignment: { paddingTop: 12, borderTopWidth: 1, borderColor: 'rgba(42,34,28,.18)', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10 },
-  grid: { ...base.grid, padding: 14, borderWidth: 1, borderColor: 'rgba(199,123,69,.18)', borderRadius: 16, backgroundColor: 'rgba(255,253,249,.30)' },
+  grid: { ...base.grid, padding: 0, borderWidth: 0, backgroundColor: 'transparent' },
   twoGrid: { ...base.twoGrid, padding: 14, borderWidth: 1, borderColor: 'rgba(199,123,69,.18)', borderRadius: 16, backgroundColor: 'rgba(255,253,249,.30)' },
   content: { ...base.content, padding: 14, borderWidth: 1, borderColor: 'rgba(199,123,69,.18)', borderRadius: 16, backgroundColor: 'rgba(255,253,249,.30)' },
   section: { ...base.section, paddingTop: 18, borderTopWidth: 1, borderColor: 'rgba(199,123,69,.18)' },
