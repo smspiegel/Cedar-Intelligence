@@ -176,12 +176,20 @@ describe("simplified monitors", () => {
     await productionApp.close();
 
     const configuredProductionApp = buildApp({ ...config, NODE_ENV: "production", CORS_ORIGINS: ["https://cedarintelligence.io"] }, repo, { async start() { return "run"; } });
-    const configuredProductionPreflight = await configuredProductionApp.inject({
-      method: "OPTIONS", url: "/v1/monitors",
-      headers: { origin: "https://cedarintelligence.io", "access-control-request-method": "GET" },
-    });
-    expect(configuredProductionPreflight.statusCode).toBe(204);
-    expect(configuredProductionPreflight.headers["access-control-allow-origin"]).toBe("https://cedarintelligence.io");
+    for (const method of ["PATCH", "DELETE"]) {
+      const configuredProductionPreflight = await configuredProductionApp.inject({
+        method: "OPTIONS", url: "/v1/monitors/monitor-id",
+        headers: {
+          origin: "https://cedarintelligence.io",
+          "access-control-request-method": method,
+          "access-control-request-headers": "authorization,content-type,if-match",
+        },
+      });
+      expect(configuredProductionPreflight.statusCode).toBe(204);
+      expect(configuredProductionPreflight.headers["access-control-allow-origin"]).toBe("https://cedarintelligence.io");
+      expect(configuredProductionPreflight.headers["access-control-allow-methods"]).toContain(method);
+      expect(configuredProductionPreflight.headers["access-control-allow-headers"]).toBe("authorization,content-type,if-match");
+    }
     await configuredProductionApp.close();
   });
 

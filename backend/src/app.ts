@@ -67,6 +67,7 @@ export function buildApp(config: AppConfig, repo: Repository, dispatcher: Workfl
   app.decorateRequest("auth", null as unknown as AuthContext);
   app.register(cors, {
     credentials: true,
+    methods: ["GET", "HEAD", "POST", "PATCH", "DELETE", "OPTIONS"],
     origin: (origin, callback) => {
       // Native clients have no browser Origin header. Web clients must be explicitly allowed.
       if (!origin) return callback(null, true);
