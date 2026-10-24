@@ -1,10 +1,25 @@
+import { createHash } from "node:crypto";
 import { AgentMemory } from "@surrealdb/memory";
 import type { AppConfig } from "../config.js";
 import type { AgentMemoryPort, MemoryRecallResult } from "../ports.js";
 import type { MemoryOutboxEvent } from "../domain.js";
 import { errorMessage } from "../utils.js";
 
-const scopeSegment = (value: string) => encodeURIComponent(value.replaceAll("/", "_"));
+const VALID_SCOPE_SEGMENT = /^[a-z0-9](?:[a-z0-9-]{0,62})$/;
+
+const scopeSegment = (value: string) => {
+  if (VALID_SCOPE_SEGMENT.test(value)) return value;
+
+  const slug = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48)
+    .replace(/-+$/g, "") || "id";
+  const digest = createHash("sha256").update(value).digest("hex").slice(0, 12);
+  return `${slug}-${digest}`;
+};
 export const monitorMemoryScope = (tenantId: string, monitorId: string) => `org/${scopeSegment(tenantId)}/monitor/${scopeSegment(monitorId)}`;
 
 export class DisabledAgentMemory implements AgentMemoryPort {

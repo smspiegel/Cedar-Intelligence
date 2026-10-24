@@ -11,7 +11,7 @@ import { LlmFindingEvaluator } from "../src/adapters/evaluator.js";
 import { loadConfig } from "../src/config.js";
 import { surrealConnectOptions } from "../src/adapters/surreal-connection.js";
 import { FindingMemoryService } from "../src/services/finding-memory.js";
-import { SurrealAgentMemory } from "../src/adapters/agent-memory.js";
+import { monitorMemoryScope, SurrealAgentMemory } from "../src/adapters/agent-memory.js";
 
 const match: SearchResult = { url: "https://example.com/launch?utm_source=test", title: "Project Birch launches", content: "Acme launched Project Birch for enterprise teams.", publishedAt: "2026-10-20T12:00:00.000Z" };
 const nonmatch: SearchResult = { url: "https://example.com/weather", title: "Weather", content: "Sunny and warm." };
@@ -300,6 +300,19 @@ describe("SurrealDB configuration", () => {
 });
 
 describe("Agent Memory adapter", () => {
+  it("creates valid, stable scope paths from Clerk organization IDs", () => {
+    const tenantId = "org_3L1ufsq0dd3Ar8WJKkjQsljaSxj";
+    const monitorId = "8511588f-27ca-42be-b665-29f709e574ce";
+    const scope = monitorMemoryScope(tenantId, monitorId);
+
+    expect(scope).toMatch(/^org\/[a-z0-9-]+\/monitor\/8511588f-27ca-42be-b665-29f709e574ce$/);
+    expect(scope).toBe(monitorMemoryScope(tenantId, monitorId));
+  });
+
+  it("does not collapse distinct tenant IDs into the same normalized scope", () => {
+    expect(monitorMemoryScope("org_acme", "monitor-a")).not.toBe(monitorMemoryScope("org-acme", "monitor-a"));
+  });
+
   it("registers a monitor scope once before writing memory", async () => {
     const memory = new SurrealAgentMemory({
       ...config, AGENT_MEMORY_MODE: "shadow", AGENT_MEMORY_ENDPOINT: "https://memory.example.com",
