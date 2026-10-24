@@ -8,6 +8,8 @@ import type { AppConfig } from "../src/config.js";
 import type { FindingEvaluator, SearchAdapter } from "../src/ports.js";
 import { buildApp } from "../src/app.js";
 import { LlmFindingEvaluator } from "../src/adapters/evaluator.js";
+import { loadConfig } from "../src/config.js";
+import { surrealConnectOptions } from "../src/adapters/surreal-connection.js";
 
 const match: SearchResult = { url: "https://example.com/launch?utm_source=test", title: "Project Birch launches", content: "Acme launched Project Birch for enterprise teams.", publishedAt: "2026-10-20T12:00:00.000Z" };
 const nonmatch: SearchResult = { url: "https://example.com/weather", title: "Weather", content: "Sunny and warm." };
@@ -115,6 +117,16 @@ describe("simplified monitors", () => {
     await app.close();
   });
 
+  it("keeps liveness healthy while readiness reports a database outage", async () => {
+    const app = buildApp(config, repo, { async start() { return "run"; } });
+    vi.spyOn(repo, "ping").mockRejectedValueOnce(new Error("database unavailable"));
+    expect((await app.inject({ method: "GET", url: "/health" })).statusCode).toBe(200);
+    const readiness = await app.inject({ method: "GET", url: "/ready" });
+    expect(readiness.statusCode).toBe(500);
+    expect(readiness.json()).toMatchObject({ error: { code: "INTERNAL", message: "Internal server error" } });
+    await app.close();
+  });
+
   it("identifies model-provider connection failures in execution errors", async () => {
     const networkError = new TypeError("fetch failed", { cause: new Error("connect ECONNREFUSED 127.0.0.1:1234") });
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(networkError));
@@ -179,4 +191,20 @@ describe("simplified monitors", () => {
     expect((await app.inject({ method: "DELETE", url: `/v1/monitors/${monitor.id}`, headers })).statusCode).toBe(204);
     expect(await repo.getMonitor("tenant-a", monitor.id)).toBeNull(); expect(await repo.listFindings("tenant-a")).toHaveLength(1); await app.close();
   });
+});
+
+describe("SurrealDB configuration", () => {
+  it("provides credentials and database selection to connect for authenticated reconnects", () => {
+    expect(surrealConnectOptions(config)).toMatchObject({
+      namespace: "cedar",
+      database: "cedar",
+      authentication: { username: "root", password: "root" },
+      reconnect: { enabled: true, attempts: -1 },
+    });
+  });
+
+  it.each(["SURREAL_URL", "SURREAL_NAMESPACE", "SURREAL_DATABASE", "SURREAL_USERNAME", "SURREAL_PASSWORD"] as const)(
+    "rejects an empty %s value",
+    key => expect(() => loadConfig({ [key]: "" })).toThrow(),
+  );
 });

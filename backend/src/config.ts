@@ -3,6 +3,7 @@ import { z } from "zod";
 
 const optionalString = z.preprocess(value => value === "" ? undefined : value, z.string().optional());
 const optionalUrl = z.preprocess(value => value === "" ? undefined : value, z.string().url().optional());
+const requiredString = z.string().trim().min(1);
 const commaSeparated = z.preprocess(value => {
   if (typeof value !== "string") return value;
   return value.split(",").map(item => item.trim()).filter(Boolean);
@@ -17,9 +18,9 @@ const Config = z.object({
   AUTH_TENANT_CLAIM: z.string().min(1).default("org_id"),
   CORS_ORIGINS: commaSeparated,
   TENANT_ID: z.string().min(1).default("demo-org"),
-  SURREAL_URL: z.string().default("ws://127.0.0.1:8000/rpc"),
-  SURREAL_NAMESPACE: z.string().default("cedar"), SURREAL_DATABASE: z.string().default("cedar"),
-  SURREAL_USERNAME: z.string().default("root"), SURREAL_PASSWORD: z.string().default("root"),
+  SURREAL_URL: requiredString.default("ws://127.0.0.1:8000/rpc"),
+  SURREAL_NAMESPACE: requiredString.default("cedar"), SURREAL_DATABASE: requiredString.default("cedar"),
+  SURREAL_USERNAME: requiredString.default("root"), SURREAL_PASSWORD: requiredString.default("root"),
   RENDER_WORKFLOW_SLUG: z.string().default("cedar-workflow"),
   EXA_API_URL: z.string().url().default("https://api.exa.ai/search"), EXA_API_KEY: optionalString,
   EXA_RESULTS_PER_QUERY: z.coerce.number().int().min(1).max(25).default(10),

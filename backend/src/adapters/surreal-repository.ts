@@ -1,17 +1,15 @@
-import { Surreal } from "surrealdb";
+import type { Surreal } from "surrealdb";
 import type { ExecutionRecord, Finding, Monitor, Observation } from "../domain.js";
 import type { Repository } from "../ports.js";
 import type { AppConfig } from "../config.js";
+import { connectSurreal } from "./surreal-connection.js";
 
 const withoutRecordId = <T extends { key: string }>(row: T): Omit<T, "key"> & { id: string } => { const { key, ...value } = row; return { ...value, id: key }; };
 
 export class SurrealRepository implements Repository {
   constructor(private db: Surreal, private config: AppConfig) {}
   static async connect(config: AppConfig) {
-    const db = new Surreal(); await db.connect(config.SURREAL_URL);
-    await db.use({ namespace: config.SURREAL_NAMESPACE, database: config.SURREAL_DATABASE });
-    await db.signin({ username: config.SURREAL_USERNAME, password: config.SURREAL_PASSWORD });
-    return new SurrealRepository(db, config);
+    return new SurrealRepository(await connectSurreal(config), config);
   }
   async initialize() {}
   async ping() { await this.db.query("RETURN true"); }

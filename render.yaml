@@ -13,7 +13,7 @@ projects:
             buildCommand: npm ci --include=dev && npm run build
             preDeployCommand: npm run migrate
             startCommand: npm start
-            healthCheckPath: /health
+            healthCheckPath: /ready
             envVars:
               - key: NODE_VERSION
                 value: 22

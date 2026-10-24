@@ -10,6 +10,7 @@ module.exports = defineConfig([
       'import/no-unresolved': ['error', { ignore: [
         '^@clerk/expo(?:/.*)?$', '^@clerk/expo-native-components$',
         '^@expo-google-fonts/manrope$', '^liquid-glass-react$',
+        '^vitest$',
       ] }],
     },
   },

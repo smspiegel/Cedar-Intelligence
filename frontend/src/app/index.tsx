@@ -55,7 +55,8 @@ export default function App() { return process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE
 function AuthenticatedApp() {
   const { isLoaded, isSignedIn, getToken } = useAuth();
   const { signOut } = useClerk();
-  const api = useMemo(() => createClerkApi(getToken), [getToken]);
+  const handleUnauthorized = useCallback(() => signOut(), [signOut]);
+  const api = useMemo(() => createClerkApi(getToken, handleUnauthorized), [getToken, handleUnauthorized]);
   if (!isLoaded) return <View style={{ alignItems: 'center', backgroundColor: C.bg, flex: 1, justifyContent: 'center' }}><ActivityIndicator color={C.ink} size="large" /></View>;
   if (!isSignedIn) return <Redirect href="/sign-in" />;
   return <CedarWorkspace api={api} signOut={() => void signOut()} />;

@@ -23,11 +23,18 @@ type Envelope<T> = { data: T };
 type Collection<T> = Envelope<T[]> & { meta?: { limit: number; hasMore?: boolean } };
 type ErrorEnvelope = { error?: { message?: string } };
 type AccessTokenProvider = () => Promise<string | null>;
+type UnauthorizedHandler = () => void | Promise<void>;
 
 export class CedarApiError extends Error {}
 
 export class CedarApi {
-  constructor(private baseUrl: string, private getAccessToken: AccessTokenProvider) {}
+  private unauthorizedNotification?: Promise<void>;
+
+  constructor(
+    private baseUrl: string,
+    private getAccessToken: AccessTokenProvider,
+    private onUnauthorized?: UnauthorizedHandler,
+  ) {}
   listMonitors() { return this.request<Collection<Monitor>>("/v1/monitors"); }
   getMonitor(id: string) { return this.request<Envelope<Monitor>>(`/v1/monitors/${encodeURIComponent(id)}`); }
   createMonitor(input: MonitorInput) { return this.request<Envelope<Monitor>>("/v1/monitors", { method: "POST", body: JSON.stringify(input) }); }
@@ -39,15 +46,28 @@ export class CedarApi {
   listFindings(monitorId?: string) { const query = monitorId ? `?monitorId=${encodeURIComponent(monitorId)}` : ""; return this.request<Collection<Finding>>(`/v1/findings${query}`); }
   getFinding(id: string) { return this.request<Envelope<Finding>>(`/v1/findings/${encodeURIComponent(id)}`); }
 
+  private notifyUnauthorized() {
+    if (!this.unauthorizedNotification) {
+      this.unauthorizedNotification = Promise.resolve()
+        .then(() => this.onUnauthorized?.())
+        .catch(() => undefined);
+    }
+    return this.unauthorizedNotification;
+  }
+
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const token = await this.getAccessToken();
-    if (!token) throw new CedarApiError("Your session has expired. Please sign in again.");
+    if (!token) {
+      await this.notifyUnauthorized();
+      throw new CedarApiError("Your session has expired. Please sign in again.");
+    }
     const response = await fetch(`${this.baseUrl}${path}`, {
       ...init,
       headers: { accept: "application/json", authorization: `Bearer ${token}`, ...(init.body ? { "content-type": "application/json" } : {}), ...init.headers },
     });
     if (!response.ok) {
       const body = await response.json().catch(() => ({})) as ErrorEnvelope;
+      if (response.status === 401) await this.notifyUnauthorized();
       throw new CedarApiError(body.error?.message ?? `Request failed (${response.status})`);
     }
     return response.status === 204 ? undefined as T : response.json() as Promise<T>;
@@ -60,8 +80,8 @@ export const createDevelopmentApi = () => {
   return baseUrl && token ? new CedarApi(baseUrl, async () => token) : null;
 };
 
-export const createClerkApi = (getToken: AccessTokenProvider) => {
+export const createClerkApi = (getToken: AccessTokenProvider, onUnauthorized: UnauthorizedHandler) => {
   const baseUrl = process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, "");
   const developmentToken = __DEV__ ? process.env.EXPO_PUBLIC_DEV_API_TOKEN : undefined;
-  return baseUrl ? new CedarApi(baseUrl, developmentToken ? async () => developmentToken : getToken) : null;
+  return baseUrl ? new CedarApi(baseUrl, developmentToken ? async () => developmentToken : getToken, onUnauthorized) : null;
 };
