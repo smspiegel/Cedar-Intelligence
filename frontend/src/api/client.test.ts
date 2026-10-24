@@ -35,4 +35,20 @@ describe('CedarApi authentication failures', () => {
     await expect(api.listMonitors()).rejects.toThrow('Request failed (500)');
     expect(onUnauthorized).not.toHaveBeenCalled();
   });
+
+  it('records finding decisions with optimistic concurrency', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: { finding: {}, event: {} } }), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const api = new CedarApi('https://api.example.com', async () => 'valid-token');
+
+    await api.recordFindingEvent('finding/one', 3, { relevance: 'false_positive', workflowState: 'dismissed' });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.example.com/v1/findings/finding%2Fone/events');
+    expect(init.method).toBe('POST');
+    expect(init.headers).toMatchObject({ 'if-match': '3', authorization: 'Bearer valid-token', 'content-type': 'application/json' });
+    expect(JSON.parse(String(init.body))).toEqual({ relevance: 'false_positive', workflowState: 'dismissed' });
+  });
 });
