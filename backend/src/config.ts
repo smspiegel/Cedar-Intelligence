@@ -26,7 +26,14 @@ const Config = z.object({
   EXA_RESULTS_PER_QUERY: z.coerce.number().int().min(1).max(25).default(10),
   EVALUATOR_URL: optionalUrl, EVALUATOR_API_KEY: optionalString,
   EVALUATOR_MODEL: z.string().default("gpt-5-mini"),
+  AGENT_MEMORY_MODE: z.enum(["off", "shadow", "assist"]).default("off"),
+  AGENT_MEMORY_ENDPOINT: optionalUrl, AGENT_MEMORY_CONTEXT: optionalString, AGENT_MEMORY_API_KEY: optionalString,
+  AGENT_MEMORY_PRINCIPAL_PREFIX: optionalString,
   POSTHOG_API_KEY: optionalString, POSTHOG_HOST: optionalUrl,
+}).superRefine((value, context) => {
+  const configured = [value.AGENT_MEMORY_ENDPOINT, value.AGENT_MEMORY_CONTEXT, value.AGENT_MEMORY_API_KEY].filter(Boolean).length;
+  if (configured !== 0 && configured !== 3) context.addIssue({ code: "custom", message: "Agent Memory requires endpoint, context, and API key together" });
+  if (value.AGENT_MEMORY_MODE !== "off" && configured !== 3) context.addIssue({ code: "custom", message: "Agent Memory credentials are required when memory mode is enabled" });
 });
 export type AppConfig = z.infer<typeof Config>;
 export const loadConfig = (env: NodeJS.ProcessEnv = process.env): AppConfig => Config.parse(env);

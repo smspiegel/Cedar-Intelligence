@@ -1,5 +1,5 @@
 import type { Surreal } from "surrealdb";
-import type { ExecutionRecord, Finding, Monitor, Observation } from "../domain.js";
+import type { EvaluationRecord, ExecutionRecord, Finding, FindingEvent, MemoryOutboxEvent, Monitor, Observation } from "../domain.js";
 import type { Repository } from "../ports.js";
 import type { AppConfig } from "../config.js";
 import { connectSurreal } from "./surreal-connection.js";
@@ -53,7 +53,13 @@ export class SurrealRepository implements Repository {
   async putObservation(value: Observation) { return this.insertOnce("observation", value); }
   async getObservation(id: string) { return this.one<Observation>("observation", id); }
   async markObservationProcessed(id: string, processedAt: string) { await this.db.query("UPDATE observation SET processedAt = $processedAt WHERE key = $key", { key: id, processedAt }); }
+  async putEvaluation(value: EvaluationRecord) { return this.insertOnce("evaluation_record", value); }
   async putFinding(value: Finding) { return this.insertOnce("finding", value); }
+  async updateFindingIfVersion(value: Finding, expectedVersion: number) {
+    const { id, ...data } = value;
+    const [rows] = await this.db.query<[Array<Finding>]>("UPDATE finding CONTENT $data WHERE key = $key AND version = $expected RETURN AFTER", { data: { ...data, key: id }, key: id, expected: expectedVersion });
+    return rows.length === 1;
+  }
   private async insertOnce(table: string, value: { id: string }) {
     const { id, ...data } = value;
     const [before] = await this.db.query<[Array<{ key: string }>]>(`INSERT INTO ${table} $data ON DUPLICATE KEY UPDATE key = key RETURN BEFORE`, { data: { ...data, key: id } });
@@ -69,6 +75,32 @@ export class SurrealRepository implements Repository {
     return rows[0]?.count ?? 0;
   }
   async getFinding(tenantId: string, id: string) { const value = await this.one<Finding>("finding", id); return value?.tenantId === tenantId ? this.normalizeFinding(value) : null; }
+  async putFindingEvent(value: FindingEvent) { return this.insertOnce("finding_event", value); }
+  async getFindingEvent(id: string) { return this.one<FindingEvent>("finding_event", id); }
+  async putFindingEventWithMemoryOutbox(value: FindingEvent, outbox?: MemoryOutboxEvent) {
+    const { id: eventId, ...event } = value;
+    if (!outbox) { await this.putFindingEvent(value); return; }
+    const { id: outboxId, ...outboxData } = outbox;
+    await this.db.query(`BEGIN TRANSACTION;
+      INSERT INTO finding_event $event ON DUPLICATE KEY UPDATE key = key;
+      INSERT INTO memory_outbox $outbox ON DUPLICATE KEY UPDATE key = key;
+      COMMIT TRANSACTION;`, { event: { ...event, key: eventId }, outbox: { ...outboxData, key: outboxId } });
+  }
+  async listFindingEvents(tenantId: string, findingId: string) {
+    const [rows] = await this.db.query<[Array<FindingEvent & { key: string }>]>("SELECT * OMIT id FROM finding_event WHERE tenantId = $tenant AND findingId = $finding ORDER BY createdAt", { tenant: tenantId, finding: findingId });
+    return rows.map(row => withoutRecordId(row) as FindingEvent);
+  }
+  async putMemoryOutboxEvent(value: MemoryOutboxEvent) { return this.insertOnce("memory_outbox", value); }
+  async listPendingMemoryOutboxEvents(tenantId: string, monitorId: string, limit = 50) {
+    const [rows] = await this.db.query<[Array<MemoryOutboxEvent & { key: string }>]>("SELECT * OMIT id FROM memory_outbox WHERE tenantId = $tenant AND monitorId = $monitor AND status IN ['pending', 'failed'] ORDER BY createdAt LIMIT $limit", { tenant: tenantId, monitor: monitorId, limit });
+    return rows.map(row => withoutRecordId(row) as MemoryOutboxEvent);
+  }
+  async markMemoryOutboxSynced(id: string, updatedAt: string, memorySessionId?: string, memoryTurnId?: string) {
+    await this.db.query("UPDATE memory_outbox SET status = 'synced', updatedAt = $updatedAt, memorySessionId = $memorySessionId, memoryTurnId = $memoryTurnId, lastError = NONE WHERE key = $key", { key: id, updatedAt, memorySessionId, memoryTurnId });
+  }
+  async markMemoryOutboxFailed(id: string, updatedAt: string, error: string) {
+    await this.db.query("UPDATE memory_outbox SET status = 'failed', attempts += 1, updatedAt = $updatedAt, lastError = $error WHERE key = $key", { key: id, updatedAt, error });
+  }
   async getObservations(tenantId: string, ids: string[]) {
     if (!ids.length) return [];
     const [rows] = await this.db.query<[Array<Observation & { key: string }>]>("SELECT * OMIT id FROM observation WHERE tenantId = $tenant AND key IN $ids", { tenant: tenantId, ids });
@@ -91,8 +123,15 @@ export class SurrealRepository implements Repository {
     const observationId = legacy.observationId ?? legacy.observationIds?.[0];
     const bucket = legacy.bucket ?? (legacy.priority === "P1" ? "threat" : legacy.priority === "P2" ? "flag" : "opportunity");
     const { priority: _priority, observationIds: _observationIds, ...finding } = legacy;
-    if (legacy.sourceUrl || !observationId) return { ...finding, observationId, bucket } as Finding;
+    const normalized = {
+      ...finding, observationId, bucket,
+      workflowState: legacy.workflowState ?? "unreviewed",
+      relevance: legacy.relevance ?? "unknown",
+      version: legacy.version ?? 1,
+      updatedAt: legacy.updatedAt ?? legacy.createdAt,
+    } as Finding;
+    if (legacy.sourceUrl || !observationId) return normalized;
     const observation = await this.one<Observation & { sourceURL?: string }>("observation", observationId);
-    return { ...finding, observationId, bucket, sourceUrl: observation?.sourceUrl ?? observation?.sourceURL } as Finding;
+    return { ...normalized, sourceUrl: observation?.canonicalUrl ?? observation?.sourceUrl ?? observation?.sourceURL } as Finding;
   }
 }

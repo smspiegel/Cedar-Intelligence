@@ -5,11 +5,12 @@ import { MonitorExecutor } from "../src/services/executor.js";
 import { queueEnabledMonitors } from "../src/services/scheduler.js";
 import type { EvaluationResult, Monitor, SearchResult } from "../src/domain.js";
 import type { AppConfig } from "../src/config.js";
-import type { FindingEvaluator, SearchAdapter } from "../src/ports.js";
+import type { AgentMemoryPort, FindingEvaluator, MemoryRecallResult, SearchAdapter } from "../src/ports.js";
 import { buildApp } from "../src/app.js";
 import { LlmFindingEvaluator } from "../src/adapters/evaluator.js";
 import { loadConfig } from "../src/config.js";
 import { surrealConnectOptions } from "../src/adapters/surreal-connection.js";
+import { FindingMemoryService } from "../src/services/finding-memory.js";
 
 const match: SearchResult = { url: "https://example.com/launch?utm_source=test", title: "Project Birch launches", content: "Acme launched Project Birch for enterprise teams.", publishedAt: "2026-10-20T12:00:00.000Z" };
 const nonmatch: SearchResult = { url: "https://example.com/weather", title: "Weather", content: "Sunny and warm." };
@@ -22,18 +23,30 @@ class FakeSearch implements SearchAdapter {
 
 class TriggerEvaluator implements FindingEvaluator {
   calls = 0;
-  async evaluate({ trigger, result }: { trigger: string; result: SearchResult }): Promise<EvaluationResult> {
+  contexts: string[] = [];
+  async evaluate({ trigger, result, historicalContext }: { trigger: string; result: SearchResult; historicalContext?: string }): Promise<EvaluationResult> {
     this.calls += 1;
+    this.contexts.push(historicalContext ?? "");
     if (!result.content.trim()) return { matched: false, title: "Insufficient evidence", reason: "The result has no usable excerpt." };
     const matched = trigger.includes("Project Birch") && result.content.includes("Project Birch");
     return matched ? { matched: true, title: result.title, reason: "The excerpt states that Acme launched Project Birch." } : { matched: false, title: "Not a match", reason: "The excerpt does not satisfy the trigger." };
   }
 }
 
+class TrackingMemory implements AgentMemoryPort {
+  readonly mode = "assist" as const;
+  recalls = 0; remembered: string[] = [];
+  async recall(): Promise<MemoryRecallResult> {
+    this.recalls += 1;
+    return { status: "recalled", text: "A prior similar finding was confirmed by a human reviewer.", traceId: "trace-memory", tier: "hybrid", hitCount: 1, queryMs: 12 };
+  }
+  async remember(event: { text: string }) { this.remembered.push(event.text); return { sessionId: "session-memory", turnId: "turn-memory" }; }
+}
+
 const config: AppConfig = {
   NODE_ENV: "test", PORT: 3000, AUTH_MODE: "development", API_TOKEN: "test-api-token", AUTH_TENANT_CLAIM: "org_id", CORS_ORIGINS: [], TENANT_ID: "tenant-a",
   SURREAL_URL: "ws://localhost:8000/rpc", SURREAL_NAMESPACE: "cedar", SURREAL_DATABASE: "cedar", SURREAL_USERNAME: "root", SURREAL_PASSWORD: "root",
-  RENDER_WORKFLOW_SLUG: "cedar", EXA_API_URL: "https://api.exa.ai/search", EXA_RESULTS_PER_QUERY: 10, EVALUATOR_MODEL: "test",
+  RENDER_WORKFLOW_SLUG: "cedar", EXA_API_URL: "https://api.exa.ai/search", EXA_RESULTS_PER_QUERY: 10, EVALUATOR_MODEL: "test", AGENT_MEMORY_MODE: "off",
 };
 
 describe("simplified monitors", () => {
@@ -82,6 +95,32 @@ describe("simplified monitors", () => {
     await execute(monitor, new FakeSearch({ "birch launch": [match], "Acme news": [duplicate] }), evaluator);
     await execute(monitor, new FakeSearch({ "birch launch": [match] }), evaluator);
     expect(await repo.listFindings("tenant-a")).toHaveLength(1); expect(evaluator.calls).toBe(1);
+  });
+
+  it("reevaluates changed content at the same canonical URL and updates the finding", async () => {
+    const monitor = await create({ queries: ["birch launch"] }); const evaluator = new TriggerEvaluator();
+    await execute(monitor, new FakeSearch({ "birch launch": [match] }), evaluator);
+    const changed = { ...match, content: "Acme launched Project Birch globally for enterprise teams." };
+    await execute(monitor, new FakeSearch({ "birch launch": [changed] }), evaluator);
+    expect(evaluator.calls).toBe(2);
+    expect(await repo.listFindings("tenant-a")).toMatchObject([{ version: 2, workflowState: "unreviewed", relevance: "unknown" }]);
+  });
+
+  it("reevaluates unchanged content after the monitor trigger version changes", async () => {
+    const monitor = await create({ queries: ["birch launch"] }); const evaluator = new TriggerEvaluator();
+    await execute(monitor, new FakeSearch({ "birch launch": [match] }), evaluator);
+    const updated = await service.patch("tenant-a", monitor.id, { trigger: "Match Project Birch anywhere" }, monitor.version);
+    await execute(updated!, new FakeSearch({ "birch launch": [match] }), evaluator);
+    expect(evaluator.calls).toBe(2);
+  });
+
+  it("recalls Agent Memory context, exposes its trace, and stores new finding events", async () => {
+    const monitor = await create({ queries: ["birch launch"] }); const evaluator = new TriggerEvaluator(); const memory = new TrackingMemory();
+    const execution = await service.run(monitor.tenantId, monitor.id);
+    await new MonitorExecutor(repo, new FakeSearch({ "birch launch": [match] }), evaluator, new FindingMemoryService(repo, memory)).execute(execution.id);
+    expect(memory.recalls).toBe(1); expect(memory.remembered[0]).toContain("Project Birch launches");
+    expect(evaluator.contexts[0]).toContain("prior similar finding was confirmed");
+    expect(await repo.getExecution("tenant-a", execution.id)).toMatchObject({ memoryStatus: "recalled", memoryTraceId: "trace-memory", memoryHitCount: 1 });
   });
 
   it("completes an empty search without calling the evaluator", async () => {
@@ -153,8 +192,23 @@ describe("simplified monitors", () => {
     const findings = await app.inject({ method: "GET", url: "/v1/findings", headers }); const finding = findings.json().data[0];
     expect(finding).toMatchObject({ sourceUrl: "https://example.com/launch", bucket: "flag" });
     const detail = await app.inject({ method: "GET", url: `/v1/findings/${finding.id}`, headers });
-    expect(detail.json().data.observations[0]).toMatchObject({ title: "Project Birch launches", sourceUrl: "https://example.com/launch" });
+    expect(detail.json().data.observations[0]).toMatchObject({ title: "Project Birch launches", canonicalUrl: "https://example.com/launch", sourceUrl: match.url });
     expect((await app.inject({ method: "GET", url: "/v1/monitors" })).statusCode).toBe(401); await app.close();
+  });
+
+  it("persists finding review state and exposes append-only history", async () => {
+    const monitor = await create({ queries: ["birch launch"] }); await execute(monitor, new FakeSearch({ "birch launch": [match] }));
+    const finding = (await repo.listFindings("tenant-a"))[0];
+    const app = buildApp(config, repo, { async start() { return "run"; } }); const headers = { authorization: "Bearer test-api-token", "if-match": "1", "idempotency-key": "review-1" };
+    const response = await app.inject({ method: "POST", url: `/v1/findings/${finding.id}/events`, headers, payload: { workflowState: "monitoring", relevance: "confirmed", note: "Keep watching this launch." } });
+    expect(response.statusCode).toBe(201);
+    expect(response.json().data.finding).toMatchObject({ workflowState: "monitoring", relevance: "confirmed", version: 2 });
+    const retry = await app.inject({ method: "POST", url: `/v1/findings/${finding.id}/events`, headers, payload: { workflowState: "monitoring", relevance: "confirmed", note: "Keep watching this launch." } });
+    expect(retry.statusCode).toBe(201);
+    expect(retry.json().data.finding.version).toBe(2);
+    const history = await app.inject({ method: "GET", url: `/v1/findings/${finding.id}/history`, headers: { authorization: "Bearer test-api-token" } });
+    expect(history.json().data).toMatchObject([{ type: "created" }, { type: "reviewed", note: "Keep watching this launch." }]);
+    await app.close();
   });
 
   it("allows Expo localhost preflights in development without opening production CORS", async () => {

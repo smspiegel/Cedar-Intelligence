@@ -7,9 +7,10 @@ Cedar is a tenant-isolated Fastify service for search-based monitoring. A monito
 1. `POST /v1/monitors/:id/executions` stores an immutable monitor snapshot and dispatches the existing Render Workflow task.
 2. The workflow searches each query with Exa's standard Search API.
 3. Results are URL-normalized and deduplicated across queries.
-4. Each result not already processed by that monitor is evaluated independently against the trigger.
-5. Matches become idempotent findings in the monitor's configured `threat`, `flag`, or `opportunity` bucket.
-6. The execution records completed/failed status and result, evaluation, and finding counts.
+4. New or changed result content is stored as a revision and evaluated against the trigger. Every match and non-match is retained as an evaluation record.
+5. Before evaluation, Cedar recalls monitor-scoped prior findings and human decisions from SurrealDB Agent Memory. In `assist` mode that history helps classify a candidate as new, updated, recurring, or unchanged; current evidence remains authoritative.
+6. Matches create or update a stable finding while preserving its human workflow state. Finding events are written to an append-only audit trail and a durable Agent Memory outbox.
+7. The execution records completed/failed status, counts, and Agent Memory recall trace metadata.
 
 Observations retain the title, excerpt, query, canonical URL, original source URL, and publication date when available. A stable monitor-plus-URL key prevents duplicate findings across reruns. Search and evaluator failures are persisted on the execution and rethrown so Render retries remain effective.
 
@@ -54,9 +55,30 @@ curl -H "Authorization: Bearer $API_TOKEN" -H 'content-type: application/json' \
 - `GET /v1/executions/:id`
 - `GET /v1/findings`
 - `GET /v1/findings/:id` (includes observation evidence)
+- `POST /v1/findings/:id/events` (requires `If-Match`; records relevance, workflow state, or a note)
+- `GET /v1/findings/:id/history`
 - `GET /v1/me`, plus public `GET /health` and `GET /ready`
 
-Monitor edits require `If-Match: <version>`. Deletes are soft deletes: future runs stop and historical findings remain.
+Monitor edits and finding decisions require `If-Match: <version>`. Findings support `unreviewed`, `monitoring`, `action_underway`, `resolved`, and `dismissed` workflow states plus `unknown`, `confirmed`, and `false_positive` relevance. Deletes are soft deletes: future runs stop and historical findings remain.
+
+## Agent Memory rollout
+
+Configure the same Agent Memory values on the API and workflow services:
+
+- `AGENT_MEMORY_ENDPOINT`, `AGENT_MEMORY_CONTEXT`, and `AGENT_MEMORY_API_KEY`
+- `AGENT_MEMORY_MODE=shadow` to exercise writes and recalls without adding recalled memory to evaluator prompts
+- `AGENT_MEMORY_MODE=assist` after trace review to add recalled context to evaluations
+- optionally `AGENT_MEMORY_PRINCIPAL_PREFIX` to use delegated tenant principals
+
+Memory is isolated by `org/<tenant>/monitor/<monitor>` scope. The API writes human review decisions through a durable outbox; the workflow flushes outstanding entries before recall and again after processing. Recall is fail-open, so an Agent Memory outage does not stop monitoring. Outbox failures remain retryable in SurrealDB.
+
+After migration and after Agent Memory credentials are configured, seed findings that predate the event log once:
+
+```bash
+AGENT_MEMORY_MODE=shadow npm run memory:backfill
+```
+
+The command is idempotent and only imports findings without history. Keep `shadow` enabled for initial production runs, inspect the `memoryStatus`, `memoryTraceId`, hit count, tier, and query latency on executions, then switch both API and workflow to `assist`.
 
 ## Scheduling and deployment
 
@@ -64,12 +86,12 @@ The root `render.yaml` defines the API, workflow, static Expo site, and one `ced
 
 Set the following secrets on Render:
 
-- API: Clerk values, SurrealDB values, `RENDER_API_KEY`, and `RENDER_WORKFLOW_SLUG`.
-- Workflow: SurrealDB values, `EXA_API_KEY`, evaluator URL/key/model, and optionally `EXA_RESULTS_PER_QUERY`.
+- API: Clerk values, SurrealDB values, Agent Memory values, `RENDER_API_KEY`, and `RENDER_WORKFLOW_SLUG`.
+- Workflow: SurrealDB values, Agent Memory values, `EXA_API_KEY`, evaluator URL/key/model, and optionally `EXA_RESULTS_PER_QUERY`.
 - Scheduler: SurrealDB values, `RENDER_API_KEY`, and `RENDER_WORKFLOW_SLUG`.
 - Frontend: `EXPO_PUBLIC_API_URL` and `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY`.
 
-The API pre-deploy command applies ordered, additive SurrealDB migrations. Migration `003_simplified_monitors.surql` retains legacy schemaless records and adds indexes for the simplified access patterns.
+The API pre-deploy command applies ordered, additive SurrealDB migrations. Migration `004_finding_memory.surql` backfills finding workflow defaults and adds evaluation, finding-event, memory-outbox, and observation-revision indexes.
 
 ## Verification
 

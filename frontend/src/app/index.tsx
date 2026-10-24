@@ -6,7 +6,7 @@ import { createPortal } from 'react-dom';
 import { ActivityIndicator, Image, Linking, Modal, Pressable, ScrollView, StyleSheet, Switch, useWindowDimensions, View } from 'react-native';
 import Animated, { cancelAnimation, Easing, useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
 import { competitors, initialPriorities, initialSources, intelligence as fixture, opportunities, topics, type Intelligence, type Kind, type Opportunity } from '@/cedar-data';
-import { CedarApi, createClerkApi, createDevelopmentApi, type Bucket, type Finding, type Monitor, type MonitorInput } from '@/api/client';
+import { CedarApi, createClerkApi, createDevelopmentApi, type Bucket, type Finding, type FindingEvent, type FindingEventInput, type FindingWorkflowState, type Monitor, type MonitorInput } from '@/api/client';
 import { defaultGlassSettings, surfaceGlassSettings } from '@/glass-settings';
 import { LiquidGlassSurface, supportsLiquidRefraction } from '@/liquid-glass-surface';
 import { ManropeText as Text, ManropeTextInput as TextInput } from '@/typography';
@@ -44,9 +44,12 @@ const nav = [['intelligence', 'Intelligence', 'intelligence'], ['monitors', 'Mon
 const kindColor = (kind: Kind) => kind === 'threat' ? [C.threat, C.threatBg] : kind === 'flag' ? [C.flag, C.flagBg] : [C.op, C.opBg];
 const getObject = (items: Intelligence[], id?: string) => items.find((item) => item.id === id);
 
+const workflowStatus = (state: FindingWorkflowState): Intelligence['status'] => ({
+  unreviewed: 'Developing', monitoring: 'Monitoring', action_underway: 'Action underway', resolved: 'Resolved', dismissed: 'Dismissed',
+} satisfies Record<FindingWorkflowState, Intelligence['status']>)[state];
 const findingToIntelligence = (finding: Finding): Intelligence => ({
-  id: finding.id, kind: finding.bucket, status: 'Developing', headline: finding.title, summary: finding.explanation,
-  updatedAt: new Date(finding.createdAt).toLocaleString(), whatHappened: [finding.explanation],
+  id: finding.id, kind: finding.bucket, status: workflowStatus(finding.workflowState), headline: finding.title, summary: finding.explanation,
+  version: finding.version, relevance: finding.relevance, updatedAt: new Date(finding.updatedAt).toLocaleString(), whatHappened: [finding.explanation],
   whyItMatters: ['This result matched a monitor trigger configured by your team.'], signals: [finding.sourceUrl],
   actions: [], topics: [],
 });
@@ -84,9 +87,14 @@ function CedarWorkspace({ api, signOut = () => {}, user = { name: 'Cedar user', 
   const attach = (id: string) => { setAttached((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]); if (!attached.includes(id)) setDrawer(true); };
   const openDraft = (title: string, note: string, body: string, sourceTitles: string[] = []) => setDraft({ title, note, body, sources: sourceTitles });
   const complete = (objectId: string, actionId: string) => setItems((current) => current.map((item) => item.id === objectId ? { ...item, actions: item.actions.map((action) => action.id === actionId ? { ...action, status: action.status === 'Complete' ? 'Suggested' : 'Complete' } : action) } : item));
+  const markFinding = async (item: Intelligence, input: FindingEventInput) => {
+    if (!api || item.version === undefined) return;
+    const result = await api.recordFindingEvent(item.id, item.version, input);
+    setItems((current) => current.map((candidate) => candidate.id === item.id ? findingToIntelligence(result.data.finding) : candidate));
+  };
   const view = (() => {
     if (route.page === 'intelligence') return <Home items={items} error={feedError} demo={!api} open={(id) => go({ page: 'detail', id })} attach={attach} briefing={() => openDraft('Executive briefing: Regulatory inquiry', 'Regulatory inquiry gaining traction on AI data use', briefing(), ['U.S. Senate Committee', 'Wall Street Journal'])} />;
-    if (route.page === 'detail') return <Detail item={getObject(items, route.id)} items={items} attached={attached} back={() => go({ page: 'intelligence' })} attach={attach} incident={() => go({ page: 'incident' })} open={(id) => go({ page: 'detail', id })} draft={openDraft} complete={complete} />;
+    if (route.page === 'detail') return <Detail api={api} item={getObject(items, route.id)} items={items} attached={attached} back={() => go({ page: 'intelligence' })} attach={attach} incident={() => go({ page: 'incident' })} open={(id) => go({ page: 'detail', id })} draft={openDraft} complete={complete} mark={markFinding} />;
     if (route.page === 'monitors') return <Monitors api={api} open={(id) => go({ page: 'monitor', id })} create={() => go({ page: 'monitor-edit' })} />;
     if (route.page === 'monitor') return <MonitorDetail api={api} id={route.id} back={() => go({ page: 'monitors' })} edit={() => go({ page: 'monitor-edit', id: route.id })} refreshFindings={refreshFindings} />;
     if (route.page === 'monitor-edit') return <MonitorEditor api={api} id={route.id} back={() => go({ page: route.id ? 'monitor' : 'monitors', id: route.id })} saved={(id) => go({ page: 'monitor', id })} />;
@@ -213,15 +221,20 @@ function MonitorEditor({ api, id, back, saved }: { api: CedarApi | null; id?: st
 
 
 function Tabs({ labels, selected, set }: { labels: string[]; selected: string; set: (value: string) => void }) { return <IntelligenceSurface style={s.contextNav} contentStyle={s.contextNavContent}><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[s.tabs, interaction.tabs]}><View style={interaction.tabRow}>{labels.map((label) => <Pressable key={label} accessibilityRole="tab" accessibilityState={{ selected: selected === label }} onPress={() => set(label)} style={[s.tab, interaction.tab, selected === label && s.tabOn]}><Text style={[s.tabText, interaction.tabText, selected === label && interaction.tabTextOn]}>{label}</Text></Pressable>)}</View></ScrollView></IntelligenceSurface>; }
-function Detail({ item, items, attached, back, attach, incident, open, draft, complete }: { item?: Intelligence; items: Intelligence[]; attached: string[]; back: () => void; attach: (id: string) => void; incident: () => void; open: (id: string) => void; draft: (title: string, note: string, body: string, sources?: string[]) => void; complete: (item: string, action: string) => void }) {
+function Detail({ api, item, items, attached, back, attach, incident, open, draft, complete, mark }: { api: CedarApi | null; item?: Intelligence; items: Intelligence[]; attached: string[]; back: () => void; attach: (id: string) => void; incident: () => void; open: (id: string) => void; draft: (title: string, note: string, body: string, sources?: string[]) => void; complete: (item: string, action: string) => void; mark: (item: Intelligence, input: FindingEventInput) => Promise<void> }) {
   const [tab, setTab] = useState('Overview');
+  const [marking, setMarking] = useState(''); const [markError, setMarkError] = useState('');
+  const [history, setHistory] = useState<FindingEvent[]>([]); const [historyError, setHistoryError] = useState('');
+  useEffect(() => { if (!api || !item || tab !== 'History') return; void api.listFindingHistory(item.id).then(result => { setHistory(result.data); setHistoryError(''); }).catch(error => setHistoryError(error instanceof Error ? error.message : 'Could not load history')); }, [api, item, item?.version, tab]);
   if (!item) return <Page><Card><T h>Object not found</T></Card></Page>;
   const related = items.filter((other) => other.id !== item.id && other.topics.some((topic) => item.topics.includes(topic)));
   const inCedar = attached.includes(item.id);
+  const applyMark = async (label: string, input: FindingEventInput) => { if (marking) return; try { setMarking(label); setMarkError(''); await mark(item, input); } catch (error) { setMarkError(error instanceof Error ? error.message : 'Could not update finding'); } finally { setMarking(''); } };
 
   return <Page>
     <Header title={item.headline} subtitle={item.summary} back="Intelligence" press={back} right={<Button cedar text={inCedar ? 'Asked Cedar' : 'Ask Cedar'} press={() => attach(item.id)} />} />
     <View style={s.inline}><Badge kind={item.kind} /><Text style={s.detailStatusMeta}>{item.status} · Updated {item.updatedAt}</Text></View>
+    {item.version !== undefined && <Section title="Review finding" subtitle="Your decision is saved to the audit history and becomes context for this monitor's future runs."><IntelligenceSurface contentStyle={s.darkPanelContent}><ActionButtons><Button primary={item.relevance !== 'confirmed'} text={marking === 'Confirm' ? 'Saving…' : 'Confirm relevant'} press={() => void applyMark('Confirm', { relevance: 'confirmed' })} /><Button text={marking === 'Monitor' ? 'Saving…' : 'Keep monitoring'} press={() => void applyMark('Monitor', { workflowState: 'monitoring' })} /><Button text={marking === 'Action' ? 'Saving…' : 'Action underway'} press={() => void applyMark('Action', { workflowState: 'action_underway' })} /><Button text={marking === 'Resolve' ? 'Saving…' : 'Resolve'} press={() => void applyMark('Resolve', { workflowState: 'resolved' })} /><Button danger text={marking === 'False positive' ? 'Saving…' : 'False positive'} press={() => void applyMark('False positive', { relevance: 'false_positive', workflowState: 'dismissed' })} /></ActionButtons>{Boolean(markError) && <Text style={s.onForestCopy}>{markError}</Text>}</IntelligenceSurface></Section>}
     {item.incident && <Button text="Open incident workspace" press={incident} />}
     <Tabs labels={['Overview', 'Updates', 'Recommended Actions', 'Related', 'History']} selected={tab} set={setTab} />
     {tab === 'Overview' && <View style={s.stack}>
@@ -233,7 +246,7 @@ function Detail({ item, items, attached, back, attach, incident, open, draft, co
     {tab === 'Updates' && <Activity />}
     {tab === 'Recommended Actions' && <Section title="Recommended actions" subtitle="Changes are recorded in the local audit trail."><Card>{item.actions.map((action, index) => <View key={action.id} style={[s.action, index < item.actions.length - 1 && s.border]}><View style={s.flex}><Text style={s.rowTitle}>{action.title}</Text><Text style={s.smallCopy}>{action.description}</Text><Meta>{action.status}</Meta></View><ActionButtons><Button text={action.output} press={() => draft(`Draft: ${action.title}`, item.headline, `Draft for ${action.title}\n\n${item.summary}\n\nRecommended posture\n${item.recommendation ?? 'Continue monitoring.'}`, item.signals)} /><Button text={action.status === 'Complete' ? 'Reopen' : 'Complete'} press={() => complete(item.id, action.id)} /></ActionButtons></View>)}</Card></Section>}
     {tab === 'Related' && <Section title="Related intelligence"><Card>{related.map((other, index) => <Pressable key={other.id} onPress={() => open(other.id)} style={[s.linkRow, index < related.length - 1 && s.border]}><Badge kind={other.kind} /><Text style={s.smallCopy}>{other.headline}</Text><Text style={s.arrow}>→</Text></Pressable>)}</Card></Section>}
-    {tab === 'History' && <Section title="Historical precedent"><IntelligenceSurface style={s.historyCard} contentStyle={s.historyForestContent}><Text style={s.onForestCopy}>In 2023, early leadership alignment contained a similar inquiry without an external response. That outcome informs Cedar’s recommendation.</Text></IntelligenceSurface></Section>}
+    {tab === 'History' && (item.version !== undefined ? <Section title="Finding history" subtitle="Append-only evidence and review events."><IntelligenceSurface style={s.historyCard} contentStyle={s.historyForestContent}>{Boolean(historyError) && <Text style={s.onForestCopy}>{historyError}</Text>}{history.map((event) => <View key={event.id} style={s.list}><Meta>{new Date(event.createdAt).toLocaleString()}</Meta><Text style={s.onForestCopy}>{event.type.replaceAll('_', ' ')} · {event.workflowState.replaceAll('_', ' ')} · {event.relevance.replaceAll('_', ' ')}{event.note ? ` · ${event.note}` : ''}</Text></View>)}{!history.length && !historyError && <Text style={s.onForestCopy}>No history recorded yet.</Text>}</IntelligenceSurface></Section> : <Section title="Historical precedent"><IntelligenceSurface style={s.historyCard} contentStyle={s.historyForestContent}><Text style={s.onForestCopy}>In 2023, early leadership alignment contained a similar inquiry without an external response. That outcome informs Cedar’s recommendation.</Text></IntelligenceSurface></Section>)}
   </Page>;
 }
 function Section({ title, subtitle, children, style }: { title: string; subtitle?: string; children: React.ReactNode; style?: object }) { const emphasized = title === 'Tracked players'; return <View style={[s.section, layout.section, emphasized && s.trackedPlayersSection, style]}><T style={emphasized ? s.trackedPlayersTitle : undefined}>{title}</T>{subtitle && <Text style={[s.subtitle, emphasized && s.trackedPlayersSubtitle]}>{subtitle}</Text>}{children}</View>; }

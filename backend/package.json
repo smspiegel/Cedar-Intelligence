@@ -14,6 +14,7 @@
     "workflow:dev": "render workflows dev -- tsx src/workflow.ts",
     "schedule": "node dist/scripts/schedule.js",
     "migrate": "tsx scripts/migrate.ts",
+    "memory:backfill": "tsx scripts/backfill-memory.ts",
     "seed": "tsx scripts/seed.ts",
     "test": "vitest run",
     "test:watch": "vitest"
@@ -26,6 +27,7 @@
     "@opentelemetry/sdk-logs": "^3.0.0",
     "@opentelemetry/sdk-node": "^0.300.0",
     "@renderinc/sdk": "^1.0.0",
+    "@surrealdb/memory": "^1.0.0-alpha.11",
     "dotenv": "latest",
     "fastify": "latest",
     "jose": "^6.2.13",

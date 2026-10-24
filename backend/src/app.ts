@@ -4,9 +4,12 @@ import { ZodError } from "zod";
 import type { PostHog } from "posthog-node";
 import { createAuthProvider, type AuthContext } from "./auth.js";
 import type { AppConfig } from "./config.js";
-import type { ExecutionRecord, Finding, Monitor, Observation } from "./domain.js";
+import type { ExecutionRecord, Finding, FindingEvent, Monitor, Observation } from "./domain.js";
 import type { Repository, WorkflowDispatcher } from "./ports.js";
 import { MonitorRunError, MonitorService } from "./services/monitor-service.js";
+import { FindingService, FindingUpdateError } from "./services/finding-service.js";
+import { FindingMemoryService } from "./services/finding-memory.js";
+import { DisabledAgentMemory } from "./adapters/agent-memory.js";
 import type { PostHogLogCapture } from "./posthog-logs.js";
 
 declare module "fastify" {
@@ -28,6 +31,7 @@ const executionDto = (execution: ExecutionRecord) => {
 };
 const observationDto = (observation: Observation) => withoutTenant(observation);
 const findingDto = (finding: Finding) => withoutTenant(finding);
+const findingEventDto = (event: FindingEvent) => withoutTenant(event);
 
 const clampLimit = (raw: unknown) => {
   const value = typeof raw === "string" ? Number(raw) : Number.NaN;
@@ -62,9 +66,10 @@ const isAllowedOrigin = (config: AppConfig, origin: string) => {
   }
 };
 
-export function buildApp(config: AppConfig, repo: Repository, dispatcher: WorkflowDispatcher, posthog?: PostHog, posthogLogs?: PostHogLogCapture) {
+export function buildApp(config: AppConfig, repo: Repository, dispatcher: WorkflowDispatcher, posthog?: PostHog, posthogLogs?: PostHogLogCapture, memory?: FindingMemoryService) {
   const app = Fastify({ logger: config.NODE_ENV !== "test" });
   const service = new MonitorService(repo, dispatcher);
+  const findingService = new FindingService(repo, memory ?? new FindingMemoryService(repo, new DisabledAgentMemory()));
   const auth = createAuthProvider(config);
   app.decorateRequest("auth", null as unknown as AuthContext);
   app.register(cors, {
@@ -86,6 +91,7 @@ export function buildApp(config: AppConfig, repo: Repository, dispatcher: Workfl
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ZodError) return reply.code(400).send(errorBody(request, "VALIDATION_FAILED", "Validation failed", error.issues));
     if (error instanceof MonitorRunError) return reply.code(error.statusCode).send(errorBody(request, error.code, error.message));
+    if (error instanceof FindingUpdateError) return reply.code(error.statusCode).send(errorBody(request, error.code, error.message));
     posthog?.captureException(error, request.auth?.subject);
     app.log.error(error);
     return reply.code(500).send(errorBody(request, "INTERNAL", "Internal server error"));
@@ -166,6 +172,21 @@ export function buildApp(config: AppConfig, repo: Repository, dispatcher: Workfl
     if (!finding) return reply.code(404).send(errorBody(request, "NOT_FOUND", "Finding not found"));
     const observations = await repo.getObservations(request.auth.tenantId, [finding.observationId]);
     return { data: { ...findingDto(finding), observations: observations.map(observationDto) } };
+  });
+  app.post<{ Params: { id: string } }>("/v1/findings/:id/events", async (request, reply) => {
+    const version = expectedVersion(request.headers["if-match"]);
+    if (version === null) return reply.code(428).send(errorBody(request, "PRECONDITION_REQUIRED", "If-Match must contain the finding version"));
+    const result = await findingService.record(
+      request.auth.tenantId, request.auth.subject ?? "authenticated-user", request.params.id, request.body, version,
+      idempotencyKey(request.headers["idempotency-key"]),
+    );
+    posthog?.capture({ event: "finding_reviewed", properties: { workflow_state: result.finding.workflowState, relevance: result.finding.relevance } });
+    return reply.code(201).send({ data: { finding: findingDto(result.finding), event: findingEventDto(result.event) } });
+  });
+  app.get<{ Params: { id: string } }>("/v1/findings/:id/history", async (request, reply) => {
+    const finding = await repo.getFinding(request.auth.tenantId, request.params.id);
+    if (!finding) return reply.code(404).send(errorBody(request, "NOT_FOUND", "Finding not found"));
+    return { data: (await repo.listFindingEvents(request.auth.tenantId, finding.id)).map(findingEventDto) };
   });
 
   app.addHook("onClose", async () => {

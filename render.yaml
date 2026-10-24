@@ -41,6 +41,16 @@ projects:
                 sync: false
               - key: SURREAL_PASSWORD
                 sync: false
+              - key: AGENT_MEMORY_MODE
+                value: off
+              - key: AGENT_MEMORY_ENDPOINT
+                sync: false
+              - key: AGENT_MEMORY_CONTEXT
+                sync: false
+              - key: AGENT_MEMORY_API_KEY
+                sync: false
+              - key: AGENT_MEMORY_PRINCIPAL_PREFIX
+                sync: false
               - key: RENDER_API_KEY
                 sync: false
               - key: RENDER_WORKFLOW_SLUG
@@ -72,6 +82,16 @@ projects:
               - key: SURREAL_USERNAME
                 sync: false
               - key: SURREAL_PASSWORD
+                sync: false
+              - key: AGENT_MEMORY_MODE
+                value: off
+              - key: AGENT_MEMORY_ENDPOINT
+                sync: false
+              - key: AGENT_MEMORY_CONTEXT
+                sync: false
+              - key: AGENT_MEMORY_API_KEY
+                sync: false
+              - key: AGENT_MEMORY_PRINCIPAL_PREFIX
                 sync: false
               - key: EVALUATOR_URL
                 sync: false

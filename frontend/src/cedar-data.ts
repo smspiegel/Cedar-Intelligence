@@ -1,9 +1,10 @@
 export type Kind = 'threat' | 'flag' | 'opportunity';
-export type Status = 'Material' | 'Developing' | 'Monitoring' | 'Action underway';
+export type Status = 'Material' | 'Developing' | 'Monitoring' | 'Action underway' | 'Resolved' | 'Dismissed';
 
 export type Action = { id: string; title: string; description: string; status: 'Suggested' | 'In progress' | 'Complete'; output: string };
 export type Intelligence = {
   id: string; kind: Kind; status: Status; headline: string; summary: string; updatedAt: string;
+  version?: number; relevance?: 'unknown' | 'confirmed' | 'false_positive';
   whatHappened: string[]; whyItMatters: string[]; signals: string[]; recommendation?: string;
   actions: Action[]; topics: string[]; competitor?: string; incident?: string;
 };

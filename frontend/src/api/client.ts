@@ -1,5 +1,7 @@
 export type Bucket = "threat" | "flag" | "opportunity";
 export type ExecutionStatus = "queued" | "running" | "completed" | "failed";
+export type FindingWorkflowState = "unreviewed" | "monitoring" | "action_underway" | "resolved" | "dismissed";
+export type FindingRelevance = "unknown" | "confirmed" | "false_positive";
 
 export type Execution = {
   id: string; monitorId: string; monitorVersion: number; renderRunId?: string;
@@ -16,8 +18,15 @@ export type Monitor = {
 export type MonitorInput = Pick<Monitor, "name" | "queries" | "trigger" | "bucket" | "enabled">;
 export type Finding = {
   id: string; monitorId: string; bucket: Bucket; title: string; explanation: string;
-  sourceUrl: string; observationId: string; createdAt: string;
+  sourceUrl: string; observationId: string; workflowState: FindingWorkflowState;
+  relevance: FindingRelevance; version: number; createdAt: string; updatedAt: string;
 };
+export type FindingEvent = {
+  id: string; monitorId: string; findingId: string; type: "created" | "evidence_updated" | "reviewed" | "note_added";
+  previousWorkflowState?: FindingWorkflowState; workflowState: FindingWorkflowState;
+  previousRelevance?: FindingRelevance; relevance: FindingRelevance; note?: string; actorId?: string; createdAt: string;
+};
+export type FindingEventInput = { workflowState?: FindingWorkflowState; relevance?: FindingRelevance; note?: string };
 
 type Envelope<T> = { data: T };
 type Collection<T> = Envelope<T[]> & { meta?: { limit: number; hasMore?: boolean } };
@@ -45,6 +54,8 @@ export class CedarApi {
   getExecution(id: string) { return this.request<Envelope<Execution>>(`/v1/executions/${encodeURIComponent(id)}`); }
   listFindings(monitorId?: string) { const query = monitorId ? `?monitorId=${encodeURIComponent(monitorId)}` : ""; return this.request<Collection<Finding>>(`/v1/findings${query}`); }
   getFinding(id: string) { return this.request<Envelope<Finding>>(`/v1/findings/${encodeURIComponent(id)}`); }
+  recordFindingEvent(id: string, version: number, input: FindingEventInput) { return this.request<Envelope<{ finding: Finding; event: FindingEvent }>>(`/v1/findings/${encodeURIComponent(id)}/events`, { method: "POST", headers: { "if-match": String(version), "idempotency-key": `${Date.now()}-${Math.random()}` }, body: JSON.stringify(input) }); }
+  listFindingHistory(id: string) { return this.request<Collection<FindingEvent>>(`/v1/findings/${encodeURIComponent(id)}/history`); }
 
   private notifyUnauthorized() {
     if (!this.unauthorizedNotification) {
