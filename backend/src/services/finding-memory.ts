@@ -7,12 +7,24 @@ export class FindingMemoryService {
   get mode() { return this.memory.mode; }
 
   async recall(tenantId: string, monitor: Monitor, executionId: string, candidateTitles: string[]) {
+    await this.projectMonitorHistory(tenantId, monitor);
     await this.flush(tenantId, monitor.id);
     return this.memory.recall({ tenantId, monitor, executionId, candidateTitles });
   }
 
+  private async projectMonitorHistory(tenantId: string, monitor: Monitor) {
+    for (const finding of await this.repo.listFindings(tenantId, monitor.id)) {
+      const history = await this.repo.listFindingEvents(tenantId, finding.id);
+      const events: FindingEvent[] = history.length ? history : [{
+        id: stableId("finding-event", "memory-backfill", finding.id), tenantId, monitorId: monitor.id,
+        findingId: finding.id, type: "created", workflowState: finding.workflowState, relevance: finding.relevance,
+        note: "Historical finding imported into Agent Memory.", createdAt: finding.updatedAt,
+      }];
+      for (const event of events) await this.recordEvent(finding, event, monitor);
+    }
+  }
+
   async recordEvent(finding: Finding, event: FindingEvent, monitor?: Monitor) {
-    if (this.memory.mode === "off") { await this.repo.putFindingEventWithMemoryOutbox(event); return; }
     const timestamp = now();
     const outbox: MemoryOutboxEvent = {
       id: stableId("memory-outbox", event.id), tenantId: event.tenantId, monitorId: event.monitorId,

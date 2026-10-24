@@ -45,6 +45,7 @@ export const ExecutionRecord = z.object({
   resultCount: z.number().int().nonnegative().optional(), evaluatedCount: z.number().int().nonnegative().optional(),
   findingsCreated: z.number().int().nonnegative().optional(), createdAt: z.string().datetime(),
   memoryStatus: z.enum(["disabled", "empty", "recalled", "unavailable"]).optional(),
+  memoryError: z.string().optional(),
   memoryTraceId: z.string().optional(), memoryTier: z.string().optional(), memoryHitCount: z.number().int().nonnegative().optional(),
   memoryQueryMs: z.number().int().nonnegative().optional(),
   startedAt: z.string().datetime().optional(), completedAt: z.string().datetime().optional(), error: z.string().optional(),

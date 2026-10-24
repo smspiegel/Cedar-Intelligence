@@ -3,7 +3,7 @@ import { InMemoryRepository } from "../src/adapters/in-memory-repository.js";
 import { MonitorService } from "../src/services/monitor-service.js";
 import { MonitorExecutor } from "../src/services/executor.js";
 import { queueEnabledMonitors } from "../src/services/scheduler.js";
-import type { EvaluationResult, Monitor, SearchResult } from "../src/domain.js";
+import type { EvaluationResult, MemoryOutboxEvent, Monitor, SearchResult } from "../src/domain.js";
 import type { AppConfig } from "../src/config.js";
 import type { AgentMemoryPort, FindingEvaluator, MemoryRecallResult, SearchAdapter } from "../src/ports.js";
 import { buildApp } from "../src/app.js";
@@ -11,6 +11,7 @@ import { LlmFindingEvaluator } from "../src/adapters/evaluator.js";
 import { loadConfig } from "../src/config.js";
 import { surrealConnectOptions } from "../src/adapters/surreal-connection.js";
 import { FindingMemoryService } from "../src/services/finding-memory.js";
+import { SurrealAgentMemory } from "../src/adapters/agent-memory.js";
 
 const match: SearchResult = { url: "https://example.com/launch?utm_source=test", title: "Project Birch launches", content: "Acme launched Project Birch for enterprise teams.", publishedAt: "2026-10-20T12:00:00.000Z" };
 const nonmatch: SearchResult = { url: "https://example.com/weather", title: "Weather", content: "Sunny and warm." };
@@ -81,6 +82,7 @@ describe("simplified monitors", () => {
   it("creates a finding for a match and copies only the configured bucket", async () => {
     const monitor = await create({ bucket: "opportunity" }); await execute(monitor, new FakeSearch({ "birch launch": [match] }));
     expect(await repo.listFindings("tenant-a")).toMatchObject([{ bucket: "opportunity", monitorId: monitor.id, sourceUrl: "https://example.com/launch" }]);
+    expect([...repo.memoryOutbox.values()]).toMatchObject([{ status: "pending", monitorId: monitor.id }]);
   });
 
   it("creates nothing for nonmatches and insufficient evidence", async () => {
@@ -106,6 +108,15 @@ describe("simplified monitors", () => {
     expect(await repo.listFindings("tenant-a")).toMatchObject([{ version: 2, workflowState: "unreviewed", relevance: "unknown" }]);
   });
 
+  it("retries an evidence update after a concurrent finding change", async () => {
+    const monitor = await create({ queries: ["birch launch"] }); const evaluator = new TriggerEvaluator();
+    await execute(monitor, new FakeSearch({ "birch launch": [match] }), evaluator);
+    const update = repo.updateFindingIfVersion.bind(repo); let conflict = true;
+    repo.updateFindingIfVersion = async (finding, version) => { if (conflict) { conflict = false; return false; } return update(finding, version); };
+    await execute(monitor, new FakeSearch({ "birch launch": [{ ...match, content: `${match.content} Now available globally.` }] }), evaluator);
+    expect(await repo.listFindings("tenant-a")).toMatchObject([{ version: 2 }]);
+  });
+
   it("reevaluates unchanged content after the monitor trigger version changes", async () => {
     const monitor = await create({ queries: ["birch launch"] }); const evaluator = new TriggerEvaluator();
     await execute(monitor, new FakeSearch({ "birch launch": [match] }), evaluator);
@@ -121,6 +132,23 @@ describe("simplified monitors", () => {
     expect(memory.recalls).toBe(1); expect(memory.remembered[0]).toContain("Project Birch launches");
     expect(evaluator.contexts[0]).toContain("prior similar finding was confirmed");
     expect(await repo.getExecution("tenant-a", execution.id)).toMatchObject({ memoryStatus: "recalled", memoryTraceId: "trace-memory", memoryHitCount: 1 });
+  });
+
+  it("automatically projects legacy findings before recall", async () => {
+    const monitor = await create({ queries: ["birch launch"] }); const memory = new TrackingMemory();
+    await repo.putFinding({
+      id: "legacy-finding", tenantId: "tenant-a", monitorId: monitor.id, bucket: "flag",
+      title: "Legacy finding", explanation: "Imported from an earlier monitor run.", sourceUrl: "https://example.com/legacy",
+      observationId: "legacy-observation", workflowState: "monitoring", relevance: "confirmed", version: 1,
+      createdAt: "2026-10-20T00:00:00.000Z", updatedAt: "2026-10-20T00:00:00.000Z",
+    });
+
+    await new FindingMemoryService(repo, memory).recall("tenant-a", monitor, "execution-a", []);
+
+    expect(memory.remembered).toHaveLength(1);
+    expect(memory.remembered[0]).toContain("Legacy finding");
+    expect(await repo.listFindingEvents("tenant-a", "legacy-finding")).toMatchObject([{ type: "created" }]);
+    expect([...repo.memoryOutbox.values()]).toMatchObject([{ status: "synced" }]);
   });
 
   it("completes an empty search without calling the evaluator", async () => {
@@ -269,4 +297,27 @@ describe("SurrealDB configuration", () => {
     "rejects an empty %s value",
     key => expect(() => loadConfig({ [key]: "" })).toThrow(),
   );
+});
+
+describe("Agent Memory adapter", () => {
+  it("registers a monitor scope once before writing memory", async () => {
+    const memory = new SurrealAgentMemory({
+      ...config, AGENT_MEMORY_MODE: "shadow", AGENT_MEMORY_ENDPOINT: "https://memory.example.com",
+      AGENT_MEMORY_CONTEXT: "cedar-test", AGENT_MEMORY_API_KEY: "sp-test",
+    });
+    const register = vi.fn().mockResolvedValue({ path: "org/tenant-a/monitor/monitor-a/" });
+    const remember = vi.fn().mockResolvedValue({ sessionId: "session", turnId: "turn" });
+    (memory as unknown as { client: { scopes: { register: typeof register }; remember: typeof remember } }).client = { scopes: { register }, remember };
+    const event: MemoryOutboxEvent = {
+      id: "outbox", tenantId: "tenant-a", monitorId: "monitor-a", findingId: "finding-a", findingEventId: "event-a",
+      text: "A finding was confirmed.", labels: ["actor=human"], status: "pending", attempts: 0,
+      createdAt: "2026-10-24T00:00:00.000Z", updatedAt: "2026-10-24T00:00:00.000Z",
+    };
+
+    await memory.remember(event); await memory.remember(event);
+
+    expect(register).toHaveBeenCalledOnce();
+    expect(register).toHaveBeenCalledWith(expect.objectContaining({ path: "org/tenant-a/monitor/monitor-a" }));
+    expect(remember).toHaveBeenCalledTimes(2);
+  });
 });

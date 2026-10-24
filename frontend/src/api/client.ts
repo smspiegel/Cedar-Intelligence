@@ -6,6 +6,8 @@ export type FindingRelevance = "unknown" | "confirmed" | "false_positive";
 export type Execution = {
   id: string; monitorId: string; monitorVersion: number; renderRunId?: string;
   status: ExecutionStatus; resultCount?: number; evaluatedCount?: number; findingsCreated?: number;
+  memoryStatus?: "disabled" | "empty" | "recalled" | "unavailable"; memoryError?: string;
+  memoryTraceId?: string; memoryTier?: string; memoryHitCount?: number; memoryQueryMs?: number;
   createdAt: string; startedAt?: string; completedAt?: string; error?: string;
 };
 

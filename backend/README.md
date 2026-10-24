@@ -70,7 +70,7 @@ Configure the same Agent Memory values on the API and workflow services:
 - `AGENT_MEMORY_MODE=assist` after trace review to add recalled context to evaluations
 - optionally `AGENT_MEMORY_PRINCIPAL_PREFIX` to use delegated tenant principals
 
-Memory is isolated by `org/<tenant>/monitor/<monitor>` scope. The API writes human review decisions through a durable outbox; the workflow flushes outstanding entries before recall and again after processing. Recall is fail-open, so an Agent Memory outage does not stop monitoring. Outbox failures remain retryable in SurrealDB.
+Memory is isolated by `org/<tenant>/monitor/<monitor>` scope. Cedar registers the scope on the first recall or write; the Agent Memory key therefore needs `scope:create` in addition to `memory:read` and `memory:write` over the Cedar organisation subtree. The API writes human review decisions through a durable outbox even while memory mode is off. Before recall, the workflow automatically projects any older findings or event history that predates the outbox, flushes outstanding entries, and flushes again after processing. Recall is fail-open, so an Agent Memory outage does not stop monitoring. Outbox failures remain retryable in SurrealDB and their latest error is exposed on execution records.
 
 After migration and after Agent Memory credentials are configured, seed findings that predate the event log once:
 
@@ -78,7 +78,7 @@ After migration and after Agent Memory credentials are configured, seed findings
 AGENT_MEMORY_MODE=shadow npm run memory:backfill
 ```
 
-The command is idempotent and only imports findings without history. Keep `shadow` enabled for initial production runs, inspect the `memoryStatus`, `memoryTraceId`, hit count, tier, and query latency on executions, then switch both API and workflow to `assist`.
+The command is idempotent and projects both legacy findings and existing event history that does not yet have an outbox record. Keep `shadow` enabled for initial production runs, inspect the `memoryStatus`, `memoryError`, `memoryTraceId`, hit count, tier, and query latency on executions, then switch both API and workflow to `assist`.
 
 ## Scheduling and deployment
 

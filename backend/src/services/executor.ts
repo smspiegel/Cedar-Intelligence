@@ -34,7 +34,7 @@ export class MonitorExecutor {
       ].filter(Boolean).join("\n\n").slice(0, 16_000);
       const contextualRunning: ExecutionRecord = {
         ...running, memoryStatus: recalled.status, memoryTraceId: recalled.traceId, memoryTier: recalled.tier,
-        memoryHitCount: recalled.hitCount, memoryQueryMs: recalled.queryMs,
+        memoryHitCount: recalled.hitCount, memoryQueryMs: recalled.queryMs, memoryError: recalled.error,
       };
       activeExecution = contextualRunning;
       await this.repo.updateExecution(contextualRunning);
@@ -64,17 +64,26 @@ export class MonitorExecutor {
         await this.repo.putEvaluation(evaluation);
         if (result.matched) {
           const timestamp = now();
-          const finding: Finding = existing
+          let previous = existing;
+          let finding: Finding = existing
             ? { ...existing, bucket: monitor.bucket, title: result.title, explanation: result.reason, sourceUrl: url, observationId, version: existing.version + 1, updatedAt: timestamp }
             : { id: findingId, tenantId: monitor.tenantId, monitorId: monitor.id, bucket: monitor.bucket, title: result.title, explanation: result.reason, sourceUrl: url, observationId, workflowState: "unreviewed", relevance: "unknown", version: 1, createdAt: timestamp, updatedAt: timestamp };
-          const stored = existing ? await this.repo.updateFindingIfVersion(finding, existing.version) : await this.repo.putFinding(finding);
+          let stored = existing ? await this.repo.updateFindingIfVersion(finding, existing.version) : await this.repo.putFinding(finding);
+          if (existing && !stored) {
+            const latest = await this.repo.getFinding(monitor.tenantId, findingId);
+            if (latest) {
+              previous = latest;
+              finding = { ...latest, bucket: monitor.bucket, title: result.title, explanation: result.reason, sourceUrl: url, observationId, version: latest.version + 1, updatedAt: timestamp };
+              stored = await this.repo.updateFindingIfVersion(finding, latest.version);
+            }
+          }
           if (!stored) throw new Error("Finding changed while the monitor execution was updating it");
           if (!existing) findingsCreated += 1;
           const event: FindingEvent = {
             id: stableId("finding-event", evaluation.id), tenantId: finding.tenantId, monitorId: finding.monitorId,
             findingId: finding.id, type: existing ? "evidence_updated" : "created",
-            previousWorkflowState: existing?.workflowState, workflowState: finding.workflowState,
-            previousRelevance: existing?.relevance, relevance: finding.relevance, createdAt: timestamp,
+            previousWorkflowState: previous?.workflowState, workflowState: finding.workflowState,
+            previousRelevance: previous?.relevance, relevance: finding.relevance, createdAt: timestamp,
           };
           await this.memory.recordEvent(finding, event, monitor);
         }

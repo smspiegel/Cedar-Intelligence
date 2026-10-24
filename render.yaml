@@ -42,7 +42,7 @@ projects:
               - key: SURREAL_PASSWORD
                 sync: false
               - key: AGENT_MEMORY_MODE
-                value: off
+                value: shadow
               - key: AGENT_MEMORY_ENDPOINT
                 sync: false
               - key: AGENT_MEMORY_CONTEXT
@@ -84,7 +84,7 @@ projects:
               - key: SURREAL_PASSWORD
                 sync: false
               - key: AGENT_MEMORY_MODE
-                value: off
+                value: shadow
               - key: AGENT_MEMORY_ENDPOINT
                 sync: false
               - key: AGENT_MEMORY_CONTEXT
