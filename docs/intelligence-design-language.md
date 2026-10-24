@@ -8,7 +8,7 @@ The language is calm, evidence-led, and alive at the edges. The work stays reada
 
 ## Core principles
 
-1. **One frame establishes each workspace.** Every page uses one lava and glass frame. Do not add a second enclosing panel around a card grid, banner, or section.
+1. **One concentric shape system establishes each workspace.** Corner radii derive from the workspace shape and the measured distance to its corresponding corner. The large desktop reference is a 26px nested-surface radius inside a 26px inset (52px workspace radius), but these are responsive values, not fixed decorations.
 2. **Forest is the shared material.** Cards, nested panels, and labelled actions reveal one measured forest field through a scrim. It is never applied as disconnected, repeated decoration.
 3. **Writing surfaces stay calm.** Editors, forms, and long reading areas use quartz with bark text, even when their surrounding shell is dark.
 4. **Depth comes from layers, not stacks of cards.** Prefer spacing, a divider, or a tonal change to another rounded container.
@@ -50,6 +50,7 @@ Use `MirroredForestField` and `IntelligenceSurface` for all nested content surfa
 - Use a dark green scrim with light type for decision surfaces: intelligence, positioning, content selection, recommendations, and contextual rails. Use a translucent moss scrim only for low-emphasis operational lists that retain bark text. Do not leave a bare white panel inside the workspace.
 - Use mint for small labels, quartz for headlines on dark forest, and softened off-white for supporting copy.
 - A forest window can be a lead card, compact action, operational card, recommendation, or contextual rail. All are windows onto the same field.
+- Apply the same calculated corner radii to every visible boundary in a forest window: its outer view, glass mask, image/scrim layer, and content clip. For each corner, calculate `container radius − distance between corresponding corners`, then enforce the responsive content-radius minimum. This keeps nearby curves concentric instead of giving every card the same arbitrary rounded rectangle.
 
 ### 3. Editorial composer
 
@@ -87,7 +88,9 @@ Keep body copy at 12.5 to 13.5px with 18 to 20px line-height. Keep heading line-
 ## Layout and shape
 
 - Use 8px as the working spacing increment. Prefer gaps of 8, 12, 16, 24, and 32px.
-- Use 12 to 16px corners for cards and 26px for the outer Intelligence frame and large composer.
+- The desktop reference uses a 26px nested-surface radius and a 26px workspace inset, producing a 52px workspace radius. On compact layouts, reduce both values together (currently a minimum 18px surface radius plus a 16px inset). Do not bind a radius directly to viewport width; derive it from the measured workspace container, whose compact padding responds to available width.
+- For each surface corner, calculate `container radius − Euclidean distance between that surface corner and the corresponding workspace corner`, clamped between the responsive surface minimum and the local geometry limit. This is Cedar's cross-platform equivalent of Apple's container-concentric behavior. A surface far from a workspace corner uses the minimum radius; a surface close to one follows the outer curve. Apply the same four calculated values to all of its clips and material layers.
+- Controls, input fields, chips, and avatars can use their own smaller radii because they are not workspace surfaces.
 - Use one panel at each hierarchy level. A card inside a card requires a functional reason, such as a writable editor inside an editorial shell.
 - On screens below 700px, stack side-by-side content, priority windows, and composer rails vertically.
 - Preserve a clear visual path: page title, priority content, section label, then feed or workspace.
@@ -127,6 +130,7 @@ Keep body copy at 12.5 to 13.5px with 18 to 20px line-height. Keep heading line-
 Before shipping a page that uses this language, confirm:
 
 - There is no unnecessary nested frame or card stack.
+- Every card, scrim, and glass mask shares its calculated four-corner concentric geometry; the enclosing workspace uses its responsive derived radius.
 - Every nested card, rail, recommendation, and labelled button uses the same forest field rather than a flat or separately cropped fill.
 - Light text over imagery sits on a sufficiently dark scrim.
 - Long-form text is edited and read on a light, high-contrast canvas.
