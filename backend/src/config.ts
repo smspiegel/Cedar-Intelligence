@@ -3,6 +3,10 @@ import { z } from "zod";
 
 const optionalString = z.preprocess(value => value === "" ? undefined : value, z.string().optional());
 const optionalUrl = z.preprocess(value => value === "" ? undefined : value, z.string().url().optional());
+const optionalPostHogProjectToken = z.preprocess(
+  value => value === "" ? undefined : value,
+  z.string().regex(/^phc_/, "POSTHOG_API_KEY must be a PostHog project token beginning with phc_").optional(),
+);
 const requiredString = z.string().trim().min(1);
 const commaSeparated = z.preprocess(value => {
   if (typeof value !== "string") return value;
@@ -29,7 +33,7 @@ const Config = z.object({
   AGENT_MEMORY_MODE: z.enum(["off", "shadow", "assist"]).default("off"),
   AGENT_MEMORY_ENDPOINT: optionalUrl, AGENT_MEMORY_CONTEXT: optionalString, AGENT_MEMORY_API_KEY: optionalString,
   AGENT_MEMORY_PRINCIPAL_PREFIX: optionalString,
-  POSTHOG_API_KEY: optionalString, POSTHOG_HOST: optionalUrl,
+  POSTHOG_API_KEY: optionalPostHogProjectToken, POSTHOG_HOST: optionalUrl,
 }).superRefine((value, context) => {
   const configured = [value.AGENT_MEMORY_ENDPOINT, value.AGENT_MEMORY_CONTEXT, value.AGENT_MEMORY_API_KEY].filter(Boolean).length;
   if (configured !== 0 && configured !== 3) context.addIssue({ code: "custom", message: "Agent Memory requires endpoint, context, and API key together" });

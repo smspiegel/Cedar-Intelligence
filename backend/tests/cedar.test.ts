@@ -297,6 +297,11 @@ describe("SurrealDB configuration", () => {
     "rejects an empty %s value",
     key => expect(() => loadConfig({ [key]: "" })).toThrow(),
   );
+
+  it("accepts a PostHog project token and rejects secret API keys", () => {
+    expect(loadConfig({ POSTHOG_API_KEY: "phc_project-token" }).POSTHOG_API_KEY).toBe("phc_project-token");
+    expect(() => loadConfig({ POSTHOG_API_KEY: "phs_secret-key" })).toThrow("must be a PostHog project token");
+  });
 });
 
 describe("Agent Memory adapter", () => {

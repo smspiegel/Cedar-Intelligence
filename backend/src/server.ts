@@ -12,5 +12,15 @@ await repo.ping();
 const memory = new FindingMemoryService(repo, createAgentMemory(config));
 const app = buildApp(config, repo, new RenderDispatcher(config.RENDER_WORKFLOW_SLUG), posthog, posthogLogs, memory);
 await app.listen({ host: "0.0.0.0", port: config.PORT });
-posthogLogs?.info("api server listening", { component: "api" });
+if (posthogLogs) {
+  posthogLogs.info("api server listening", { component: "api", environment: config.NODE_ENV });
+  try {
+    await posthogLogs.flush();
+    app.log.info({ posthog_host: config.POSTHOG_HOST }, "PostHog startup log export succeeded");
+  } catch (error) {
+    app.log.error({ err: error, posthog_host: config.POSTHOG_HOST }, "PostHog startup log export failed");
+  }
+} else {
+  app.log.warn("PostHog logging disabled: POSTHOG_API_KEY or POSTHOG_HOST is not configured");
+}
 
