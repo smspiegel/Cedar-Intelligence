@@ -14,6 +14,7 @@ export interface PostHogLogCapture {
 }
 
 export const createPostHogLogCapture = (config: AppConfig): PostHogLogCapture | undefined => {
+  if (config.NODE_ENV !== "production") return undefined;
   if (!config.POSTHOG_API_KEY || !config.POSTHOG_HOST) return undefined;
 
   const processor = new BatchLogRecordProcessor({

@@ -12,6 +12,8 @@ import { loadConfig } from "../src/config.js";
 import { surrealConnectOptions } from "../src/adapters/surreal-connection.js";
 import { FindingMemoryService } from "../src/services/finding-memory.js";
 import { monitorMemoryScope, SurrealAgentMemory } from "../src/adapters/agent-memory.js";
+import { createPostHog } from "../src/posthog.js";
+import { createPostHogLogCapture } from "../src/posthog-logs.js";
 
 const match: SearchResult = { url: "https://example.com/launch?utm_source=test", title: "Project Birch launches", content: "Acme launched Project Birch for enterprise teams.", publishedAt: "2026-10-20T12:00:00.000Z" };
 const nonmatch: SearchResult = { url: "https://example.com/weather", title: "Weather", content: "Sunny and warm." };
@@ -301,6 +303,16 @@ describe("SurrealDB configuration", () => {
   it("accepts a PostHog project token and rejects secret API keys", () => {
     expect(loadConfig({ POSTHOG_API_KEY: "phc_project-token" }).POSTHOG_API_KEY).toBe("phc_project-token");
     expect(() => loadConfig({ POSTHOG_API_KEY: "phs_secret-key" })).toThrow("must be a PostHog project token");
+  });
+
+  it("does not export PostHog telemetry outside production", () => {
+    const developmentConfig = loadConfig({
+      POSTHOG_API_KEY: "phc_project-token",
+      POSTHOG_HOST: "https://us.i.posthog.com",
+    });
+
+    expect(createPostHog(developmentConfig)).toBeUndefined();
+    expect(createPostHogLogCapture(developmentConfig)).toBeUndefined();
   });
 });
 
