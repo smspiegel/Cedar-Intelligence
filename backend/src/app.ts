@@ -1,11 +1,13 @@
 import cors from "@fastify/cors";
 import Fastify, { type FastifyRequest } from "fastify";
 import { ZodError } from "zod";
+import type { PostHog } from "posthog-node";
 import { createAuthProvider, type AuthContext } from "./auth.js";
 import type { AppConfig } from "./config.js";
 import type { ExecutionRecord, Finding, Monitor, Observation } from "./domain.js";
 import type { Repository, WorkflowDispatcher } from "./ports.js";
 import { MonitorRunError, MonitorService } from "./services/monitor-service.js";
+import type { PostHogLogCapture } from "./posthog-logs.js";
 
 declare module "fastify" {
   interface FastifyRequest { auth: AuthContext }
@@ -60,7 +62,7 @@ const isAllowedOrigin = (config: AppConfig, origin: string) => {
   }
 };
 
-export function buildApp(config: AppConfig, repo: Repository, dispatcher: WorkflowDispatcher) {
+export function buildApp(config: AppConfig, repo: Repository, dispatcher: WorkflowDispatcher, posthog?: PostHog, posthogLogs?: PostHogLogCapture) {
   const app = Fastify({ logger: config.NODE_ENV !== "test" });
   const service = new MonitorService(repo, dispatcher);
   const auth = createAuthProvider(config);
@@ -79,10 +81,12 @@ export function buildApp(config: AppConfig, repo: Repository, dispatcher: Workfl
     const context = await auth.authenticate(request.headers.authorization);
     if (!context) return reply.code(401).send(errorBody(request, "UNAUTHENTICATED", "Authentication is required"));
     request.auth = context;
+    if (context.subject) posthog?.enterContext({ distinctId: context.subject }, { fresh: true });
   });
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ZodError) return reply.code(400).send(errorBody(request, "VALIDATION_FAILED", "Validation failed", error.issues));
     if (error instanceof MonitorRunError) return reply.code(error.statusCode).send(errorBody(request, error.code, error.message));
+    posthog?.captureException(error, request.auth?.subject);
     app.log.error(error);
     return reply.code(500).send(errorBody(request, "INTERNAL", "Internal server error"));
   });
@@ -105,6 +109,10 @@ export function buildApp(config: AppConfig, repo: Repository, dispatcher: Workfl
   });
   app.post("/v1/monitors", async (request, reply) => {
     const monitor = await service.create(request.auth.tenantId, request.body);
+    posthog?.capture({
+      event: "monitor_created",
+      properties: { bucket: monitor.bucket, query_count: monitor.queries.length, enabled: monitor.enabled },
+    });
     return reply.code(201).send({ data: monitorDto(monitor) });
   });
   app.get<{ Params: { id: string } }>("/v1/monitors/:id", async (request, reply) => {
@@ -118,14 +126,24 @@ export function buildApp(config: AppConfig, repo: Repository, dispatcher: Workfl
     if (version === null) return reply.code(428).send(errorBody(request, "PRECONDITION_REQUIRED", "If-Match must contain the monitor version"));
     const monitor = await service.patch(request.auth.tenantId, request.params.id, request.body, version);
     if (!monitor) return reply.code(404).send(errorBody(request, "NOT_FOUND", "Monitor not found"));
+    posthog?.capture({
+      event: "monitor_updated",
+      properties: { bucket: monitor.bucket, query_count: monitor.queries.length, enabled: monitor.enabled, version: monitor.version },
+    });
     return { data: monitorDto(monitor) };
   });
   app.delete<{ Params: { id: string } }>("/v1/monitors/:id", async (request, reply) => {
     if (!await service.remove(request.auth.tenantId, request.params.id)) return reply.code(404).send(errorBody(request, "NOT_FOUND", "Monitor not found"));
+    posthog?.capture({ event: "monitor_deleted", properties: { deletion_type: "archive" } });
     return reply.code(204).send();
   });
   app.post<{ Params: { id: string } }>("/v1/monitors/:id/executions", async (request, reply) => {
     const execution = await service.run(request.auth.tenantId, request.params.id, idempotencyKey(request.headers["idempotency-key"]));
+    posthog?.capture({
+      event: "monitor_execution_queued",
+      properties: { monitor_version: execution.monitorVersion, uses_idempotency_key: Boolean(idempotencyKey(request.headers["idempotency-key"])) },
+    });
+    posthogLogs?.info("monitor execution queued", { monitor_version: execution.monitorVersion });
     return reply.code(202).header("location", `/v1/executions/${execution.id}`).send({ data: executionDto(execution) });
   });
   app.get<{ Params: { id: string }; Querystring: { limit?: string } }>("/v1/monitors/:id/executions", async (request, reply) => {
@@ -150,6 +168,8 @@ export function buildApp(config: AppConfig, repo: Repository, dispatcher: Workfl
     return { data: { ...findingDto(finding), observations: observations.map(observationDto) } };
   });
 
-  app.addHook("onClose", async () => repo.close());
+  app.addHook("onClose", async () => {
+    await Promise.all([repo.close(), posthog?.shutdown(), posthogLogs?.shutdown()]);
+  });
   return app;
 }

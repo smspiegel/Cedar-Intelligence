@@ -1,6 +1,6 @@
 import type { ExecutionRecord, Finding, Observation, SearchResult } from "../domain.js";
 import type { FindingEvaluator, Repository, SearchAdapter } from "../ports.js";
-import { canonicalUrl, errorMessage, now, stableId } from "../utils.js";
+import { canonicalUrl, errorMessage, newId, now, stableId } from "../utils.js";
 
 export class MonitorExecutor {
   constructor(private repo: Repository, private search: SearchAdapter, private evaluator: FindingEvaluator) {}
@@ -16,6 +16,7 @@ export class MonitorExecutor {
       for (const query of monitor.queries) for (const result of await this.search.search(query)) {
         const url = canonicalUrl(result.url); if (!unique.has(url)) unique.set(url, { query, result: { ...result, url } });
       }
+      const aiSessionId = `execution-${execution.id}`;
       let evaluatedCount = 0, findingsCreated = 0;
       for (const [url, item] of unique) {
         const observationId = stableId("observation", monitor.id, url);
@@ -23,7 +24,7 @@ export class MonitorExecutor {
         const created = await this.repo.putObservation(candidate);
         const observation = created ? candidate : await this.repo.getObservation(observationId);
         if (!observation || observation.processedAt) continue;
-        const result = await this.evaluator.evaluate({ trigger: monitor.trigger, result: item.result });
+        const result = await this.evaluator.evaluate({ trigger: monitor.trigger, result: item.result, aiSessionId, aiTraceId: newId() });
         evaluatedCount += 1;
         if (result.matched) {
           const finding: Finding = { id: stableId("finding", monitor.id, url), tenantId: monitor.tenantId, monitorId: monitor.id, bucket: monitor.bucket, title: result.title, explanation: result.reason, sourceUrl: item.result.url, observationId, createdAt: now() };

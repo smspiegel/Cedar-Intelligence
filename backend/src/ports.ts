@@ -28,4 +28,4 @@ export interface Repository {
 
 export interface WorkflowDispatcher { start(executionId: string): Promise<string>; }
 export interface SearchAdapter { search(query: string): Promise<SearchResult[]>; }
-export interface FindingEvaluator { evaluate(input: { trigger: string; result: SearchResult }): Promise<EvaluationResult>; }
+export interface FindingEvaluator { evaluate(input: { trigger: string; result: SearchResult; aiSessionId?: string; aiTraceId?: string }): Promise<EvaluationResult>; }

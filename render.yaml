@@ -45,6 +45,10 @@ projects:
                 sync: false
               - key: RENDER_WORKFLOW_SLUG
                 value: cedar-workflow
+              - key: POSTHOG_API_KEY
+                sync: false
+              - key: POSTHOG_HOST
+                value: https://us.i.posthog.com
 
           - type: workflow
             name: cedar-workflow
@@ -79,6 +83,10 @@ projects:
                 sync: false
               - key: EXA_RESULTS_PER_QUERY
                 value: 10
+              - key: POSTHOG_API_KEY
+                sync: false
+              - key: POSTHOG_HOST
+                value: https://us.i.posthog.com
 
           - type: cron
             name: cedar-monitor-scheduler

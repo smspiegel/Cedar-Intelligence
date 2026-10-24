@@ -26,6 +26,7 @@ const Config = z.object({
   EXA_RESULTS_PER_QUERY: z.coerce.number().int().min(1).max(25).default(10),
   EVALUATOR_URL: optionalUrl, EVALUATOR_API_KEY: optionalString,
   EVALUATOR_MODEL: z.string().default("gpt-5-mini"),
+  POSTHOG_API_KEY: optionalString, POSTHOG_HOST: optionalUrl,
 });
 export type AppConfig = z.infer<typeof Config>;
 export const loadConfig = (env: NodeJS.ProcessEnv = process.env): AppConfig => Config.parse(env);
